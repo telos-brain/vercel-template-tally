@@ -22,6 +22,8 @@ export default async function middleware(
     // Brain tool callbacks use dual-secret handshake (not Clerk):
     // Authorization: Bearer TOOL_API_KEY + X-Brain-Authorization: Bearer BRAIN_API_KEY
     "/api/tools(.*)",
+    // Vercel cron / manual heartbeat uses Authorization: Bearer CRON_SECRET
+    "/api/cron(.*)",
   ]);
 
   const isApiRoute = createRouteMatcher(["/api(.*)"]);
