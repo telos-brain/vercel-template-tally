@@ -24,4 +24,4 @@ DO $$ BEGIN
     DROP TYPE "public"."insight_categories_old";
   END IF;
 END $$;--> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS "idx_insights_org_category_ready_day" ON "insights" USING btree ("organisation_id","category",(("created_at" AT TIME ZONE 'UTC')::date)) WHERE "insights"."status" = 'ready';
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_insights_org_category_ready_day" ON "insights" USING btree ("organisation_id","category",(("created_at")::date)) WHERE "insights"."status" = 'ready';
