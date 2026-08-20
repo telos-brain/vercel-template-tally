@@ -55,6 +55,7 @@ function main() {
   const toolApiKey = keepIfSet(process.env.MY_APP_API_KEY) ?? keepIfSet(process.env.TOOL_API_KEY);
   const brainApiKey = keepIfSet(process.env.BRAIN_API_KEY);
   const appUrl = resolveAppUrl();
+  console.log(`MY_APP_API_URL=${appUrl}`);
 
   if (!anthropicKey) {
     throwFail("ANTHROPIC_API_KEY is required for hosted Brain workflows.");
@@ -186,19 +187,24 @@ function assertInstanceName(name) {
 
 function resolveAppUrl() {
   const explicit = keepIfSet(process.env.MY_APP_API_URL);
-  if (explicit) {
+  if (explicit && !isLocalAppUrl(explicit)) {
     return withHttps(explicit);
+  }
+  if (explicit) {
+    console.log(
+      `Ignoring MY_APP_API_URL=${explicit} — Telos Hosted cannot call Docker/loopback. Using the public Vercel/site URL.`,
+    );
   }
 
   if (process.env.VERCEL_ENV === "production") {
     const productionHost = keepIfSet(process.env.VERCEL_PROJECT_PRODUCTION_URL);
-    if (productionHost) {
+    if (productionHost && !isLocalAppUrl(productionHost)) {
       return withHttps(productionHost);
     }
   }
 
   const vercelUrl = keepIfSet(process.env.VERCEL_URL);
-  if (vercelUrl) {
+  if (vercelUrl && !isLocalAppUrl(vercelUrl)) {
     return withHttps(vercelUrl);
   }
 
@@ -208,8 +214,13 @@ function resolveAppUrl() {
   }
 
   throwFail(
-    "MY_APP_API_URL is required so Brain can call this app (or VERCEL_PROJECT_PRODUCTION_URL / VERCEL_URL on Vercel).",
+    "Hosted MY_APP_API_URL must be the public https:// app URL (not host.docker.internal). Set MY_APP_API_URL, or deploy on Vercel so VERCEL_PROJECT_PRODUCTION_URL / VERCEL_URL is available.",
   );
+}
+
+function isLocalAppUrl(value) {
+  const host = hostnameFrom(value);
+  return Boolean(host && LOCAL_HOSTS.has(host));
 }
 
 function isPublicHttpsHost(value) {
@@ -256,8 +267,14 @@ function hostnameFrom(value) {
 }
 
 function withHttps(value) {
-  if (/^https?:\/\//i.test(value)) {
+  if (/^https:\/\//i.test(value)) {
     return value;
+  }
+  if (/^http:\/\//i.test(value)) {
+    if (isLocalAppUrl(value)) {
+      return value;
+    }
+    return value.replace(/^http:\/\//i, "https://");
   }
   return `https://${value}`;
 }
