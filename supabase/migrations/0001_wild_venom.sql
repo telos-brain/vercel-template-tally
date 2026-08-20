@@ -125,47 +125,58 @@ DO $$ BEGIN
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "insights_org_status_idx" ON "insights" USING btree ("organisation_id","status");--> statement-breakpoint
+DROP INDEX IF EXISTS "insights_org_status_idx";--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "idx_insights_org_status" ON "insights" USING btree ("organisation_id","status");--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "budgets" ADD CONSTRAINT "budgets_org_category_period_start_unique" UNIQUE("organisation_id","category","period","starts_on");
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "transactions" ADD CONSTRAINT "transactions_org_dedupe_unique" UNIQUE("organisation_id","dedupe_key");
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;--> statement-breakpoint
 ALTER TABLE "budgets" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 ALTER TABLE "budgets" FORCE ROW LEVEL SECURITY;--> statement-breakpoint
 DROP POLICY IF EXISTS "budgets_select" ON "budgets";--> statement-breakpoint
-CREATE POLICY "budgets_select" ON "budgets" FOR SELECT USING (NULLIF(current_setting('app.org_id', true), '') IS NULL OR organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
+CREATE POLICY "budgets_select" ON "budgets" FOR SELECT USING (organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
 DROP POLICY IF EXISTS "budgets_insert" ON "budgets";--> statement-breakpoint
-CREATE POLICY "budgets_insert" ON "budgets" FOR INSERT WITH CHECK (NULLIF(current_setting('app.org_id', true), '') IS NULL OR organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
+CREATE POLICY "budgets_insert" ON "budgets" FOR INSERT WITH CHECK (organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
 DROP POLICY IF EXISTS "budgets_update" ON "budgets";--> statement-breakpoint
-CREATE POLICY "budgets_update" ON "budgets" FOR UPDATE USING (NULLIF(current_setting('app.org_id', true), '') IS NULL OR organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
+CREATE POLICY "budgets_update" ON "budgets" FOR UPDATE USING (organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
 DROP POLICY IF EXISTS "budgets_delete" ON "budgets";--> statement-breakpoint
-CREATE POLICY "budgets_delete" ON "budgets" FOR DELETE USING (NULLIF(current_setting('app.org_id', true), '') IS NULL OR organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
+CREATE POLICY "budgets_delete" ON "budgets" FOR DELETE USING (organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
 ALTER TABLE "transactions" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 ALTER TABLE "transactions" FORCE ROW LEVEL SECURITY;--> statement-breakpoint
 DROP POLICY IF EXISTS "transactions_select" ON "transactions";--> statement-breakpoint
-CREATE POLICY "transactions_select" ON "transactions" FOR SELECT USING (NULLIF(current_setting('app.org_id', true), '') IS NULL OR organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
+CREATE POLICY "transactions_select" ON "transactions" FOR SELECT USING (organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
 DROP POLICY IF EXISTS "transactions_insert" ON "transactions";--> statement-breakpoint
-CREATE POLICY "transactions_insert" ON "transactions" FOR INSERT WITH CHECK (NULLIF(current_setting('app.org_id', true), '') IS NULL OR organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
+CREATE POLICY "transactions_insert" ON "transactions" FOR INSERT WITH CHECK (organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
 DROP POLICY IF EXISTS "transactions_update" ON "transactions";--> statement-breakpoint
-CREATE POLICY "transactions_update" ON "transactions" FOR UPDATE USING (NULLIF(current_setting('app.org_id', true), '') IS NULL OR organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
+CREATE POLICY "transactions_update" ON "transactions" FOR UPDATE USING (organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
 DROP POLICY IF EXISTS "transactions_delete" ON "transactions";--> statement-breakpoint
-CREATE POLICY "transactions_delete" ON "transactions" FOR DELETE USING (NULLIF(current_setting('app.org_id', true), '') IS NULL OR organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
+CREATE POLICY "transactions_delete" ON "transactions" FOR DELETE USING (organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
 ALTER TABLE "chat_sessions" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 ALTER TABLE "chat_sessions" FORCE ROW LEVEL SECURITY;--> statement-breakpoint
 DROP POLICY IF EXISTS "chat_sessions_select" ON "chat_sessions";--> statement-breakpoint
-CREATE POLICY "chat_sessions_select" ON "chat_sessions" FOR SELECT USING (NULLIF(current_setting('app.org_id', true), '') IS NULL OR organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
+CREATE POLICY "chat_sessions_select" ON "chat_sessions" FOR SELECT USING (organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
 DROP POLICY IF EXISTS "chat_sessions_insert" ON "chat_sessions";--> statement-breakpoint
-CREATE POLICY "chat_sessions_insert" ON "chat_sessions" FOR INSERT WITH CHECK (NULLIF(current_setting('app.org_id', true), '') IS NULL OR organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
+CREATE POLICY "chat_sessions_insert" ON "chat_sessions" FOR INSERT WITH CHECK (organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
 DROP POLICY IF EXISTS "chat_sessions_update" ON "chat_sessions";--> statement-breakpoint
-CREATE POLICY "chat_sessions_update" ON "chat_sessions" FOR UPDATE USING (NULLIF(current_setting('app.org_id', true), '') IS NULL OR organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
+CREATE POLICY "chat_sessions_update" ON "chat_sessions" FOR UPDATE USING (organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
 DROP POLICY IF EXISTS "chat_sessions_delete" ON "chat_sessions";--> statement-breakpoint
-CREATE POLICY "chat_sessions_delete" ON "chat_sessions" FOR DELETE USING (NULLIF(current_setting('app.org_id', true), '') IS NULL OR organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
+CREATE POLICY "chat_sessions_delete" ON "chat_sessions" FOR DELETE USING (organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
 ALTER TABLE "insights" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 ALTER TABLE "insights" FORCE ROW LEVEL SECURITY;--> statement-breakpoint
 DROP POLICY IF EXISTS "insights_select" ON "insights";--> statement-breakpoint
-CREATE POLICY "insights_select" ON "insights" FOR SELECT USING (NULLIF(current_setting('app.org_id', true), '') IS NULL OR organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
+CREATE POLICY "insights_select" ON "insights" FOR SELECT USING (organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
 DROP POLICY IF EXISTS "insights_insert" ON "insights";--> statement-breakpoint
-CREATE POLICY "insights_insert" ON "insights" FOR INSERT WITH CHECK (NULLIF(current_setting('app.org_id', true), '') IS NULL OR organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
+CREATE POLICY "insights_insert" ON "insights" FOR INSERT WITH CHECK (organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
 DROP POLICY IF EXISTS "insights_update" ON "insights";--> statement-breakpoint
-CREATE POLICY "insights_update" ON "insights" FOR UPDATE USING (NULLIF(current_setting('app.org_id', true), '') IS NULL OR organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
+CREATE POLICY "insights_update" ON "insights" FOR UPDATE USING (organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
 DROP POLICY IF EXISTS "insights_delete" ON "insights";--> statement-breakpoint
-CREATE POLICY "insights_delete" ON "insights" FOR DELETE USING (NULLIF(current_setting('app.org_id', true), '') IS NULL OR organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
+CREATE POLICY "insights_delete" ON "insights" FOR DELETE USING (organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid);--> statement-breakpoint
 ALTER TABLE "chat_messages" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 ALTER TABLE "chat_messages" FORCE ROW LEVEL SECURITY;--> statement-breakpoint
 DROP POLICY IF EXISTS "chat_messages_select" ON "chat_messages";--> statement-breakpoint
@@ -173,10 +184,7 @@ CREATE POLICY "chat_messages_select" ON "chat_messages" FOR SELECT USING (
   EXISTS (
     SELECT 1 FROM "chat_sessions"
     WHERE "chat_sessions".id = "chat_messages".session_id
-    AND (
-      NULLIF(current_setting('app.org_id', true), '') IS NULL
-      OR "chat_sessions".organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid
-    )
+    AND "chat_sessions".organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid
   )
 );--> statement-breakpoint
 DROP POLICY IF EXISTS "chat_messages_insert" ON "chat_messages";--> statement-breakpoint
@@ -184,10 +192,7 @@ CREATE POLICY "chat_messages_insert" ON "chat_messages" FOR INSERT WITH CHECK (
   EXISTS (
     SELECT 1 FROM "chat_sessions"
     WHERE "chat_sessions".id = "chat_messages".session_id
-    AND (
-      NULLIF(current_setting('app.org_id', true), '') IS NULL
-      OR "chat_sessions".organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid
-    )
+    AND "chat_sessions".organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid
   )
 );--> statement-breakpoint
 DROP POLICY IF EXISTS "chat_messages_update" ON "chat_messages";--> statement-breakpoint
@@ -195,10 +200,7 @@ CREATE POLICY "chat_messages_update" ON "chat_messages" FOR UPDATE USING (
   EXISTS (
     SELECT 1 FROM "chat_sessions"
     WHERE "chat_sessions".id = "chat_messages".session_id
-    AND (
-      NULLIF(current_setting('app.org_id', true), '') IS NULL
-      OR "chat_sessions".organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid
-    )
+    AND "chat_sessions".organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid
   )
 );--> statement-breakpoint
 DROP POLICY IF EXISTS "chat_messages_delete" ON "chat_messages";--> statement-breakpoint
@@ -206,9 +208,6 @@ CREATE POLICY "chat_messages_delete" ON "chat_messages" FOR DELETE USING (
   EXISTS (
     SELECT 1 FROM "chat_sessions"
     WHERE "chat_sessions".id = "chat_messages".session_id
-    AND (
-      NULLIF(current_setting('app.org_id', true), '') IS NULL
-      OR "chat_sessions".organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid
-    )
+    AND "chat_sessions".organisation_id = NULLIF(current_setting('app.org_id', true), '')::uuid
   )
 );

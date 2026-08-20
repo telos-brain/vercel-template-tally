@@ -1,4 +1,4 @@
-import { db } from "@db/index";
+import { withOrgContext } from "@db/index";
 import {
   insights,
   transactions,
@@ -18,22 +18,26 @@ const INSIGHT_WORKFLOW_CODE = "WF-FINANCE-INSIGHT";
 const INSIGHT_UNIT_OF_WORK_TYPE = "insight";
 
 export async function listInsights(organisationId: string): Promise<Insight[]> {
-  return db
-    .select()
-    .from(insights)
-    .where(eq(insights.organisationId, organisationId))
-    .orderBy(desc(insights.createdAt));
+  return withOrgContext(organisationId, tx =>
+    tx
+      .select()
+      .from(insights)
+      .where(eq(insights.organisationId, organisationId))
+      .orderBy(desc(insights.createdAt))
+  );
 }
 
 export async function organisationHasTransactions(
   organisationId: string
 ): Promise<boolean> {
-  const [row] = await db
-    .select({ value: count() })
-    .from(transactions)
-    .where(eq(transactions.organisationId, organisationId));
+  return withOrgContext(organisationId, async tx => {
+    const [row] = await tx
+      .select({ value: count() })
+      .from(transactions)
+      .where(eq(transactions.organisationId, organisationId));
 
-  return (row?.value ?? 0) > 0;
+    return (row?.value ?? 0) > 0;
+  });
 }
 
 export async function queueInsights(
@@ -52,16 +56,23 @@ export async function queueInsights(
   const created: Insight[] = [];
 
   for (const category of categories) {
-    const [row] = await db
-      .insert(insights)
-      .values({
-        organisationId,
-        category,
-        status: "analysing",
-        title: "",
-        tips: [],
-      })
-      .returning();
+    const row = await withOrgContext(organisationId, async tx => {
+      const [inserted] = await tx
+        .insert(insights)
+        .values({
+          organisationId,
+          category,
+          status: "analysing",
+          title: "",
+          tips: [],
+        })
+        .returning();
+      return inserted;
+    });
+
+    if (!row) {
+      throw new Error("Insight was not saved.");
+    }
 
     try {
       let unitOfWorkId: string | undefined;
@@ -90,15 +101,18 @@ export async function queueInsights(
         },
       });
 
-      const [updated] = await db
-        .update(insights)
-        .set({
-          brainUnitOfWorkId: unitOfWorkId ?? null,
-          brainRunId: run.runId,
-          updatedAt: new Date(),
-        })
-        .where(eq(insights.id, row.id))
-        .returning();
+      const updated = await withOrgContext(organisationId, async tx => {
+        const [saved] = await tx
+          .update(insights)
+          .set({
+            brainUnitOfWorkId: unitOfWorkId ?? null,
+            brainRunId: run.runId,
+            updatedAt: new Date(),
+          })
+          .where(eq(insights.id, row.id))
+          .returning();
+        return saved;
+      });
 
       created.push(updated ?? row);
     } catch (error) {
@@ -107,15 +121,18 @@ export async function queueInsights(
         error instanceof Error && error.message
           ? error.message
           : "Could not analyse this category.";
-      const [failed] = await db
-        .update(insights)
-        .set({
-          status: "failed",
-          title: detail,
-          updatedAt: new Date(),
-        })
-        .where(eq(insights.id, row.id))
-        .returning();
+      const failed = await withOrgContext(organisationId, async tx => {
+        const [saved] = await tx
+          .update(insights)
+          .set({
+            status: "failed",
+            title: detail,
+            updatedAt: new Date(),
+          })
+          .where(eq(insights.id, row.id))
+          .returning();
+        return saved;
+      });
 
       created.push(
         failed ?? {
@@ -156,36 +173,40 @@ export async function completeInsight(
     throw new Error("tips must include at least one sentence.");
   }
 
-  const [updated] = await db
-    .update(insights)
-    .set({
-      status: "ready",
-      title,
-      tips,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(eq(insights.id, insightId), eq(insights.organisationId, organisationId))
-    )
-    .returning();
+  return withOrgContext(organisationId, async tx => {
+    const [updated] = await tx
+      .update(insights)
+      .set({
+        status: "ready",
+        title,
+        tips,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(eq(insights.id, insightId), eq(insights.organisationId, organisationId))
+      )
+      .returning();
 
-  if (!updated) {
-    throw new Error("Insight not found.");
-  }
+    if (!updated) {
+      throw new Error("Insight not found.");
+    }
 
-  return updated;
+    return updated;
+  });
 }
 
 export async function dismissInsight(
   organisationId: string,
   insightId: string
 ): Promise<boolean> {
-  const deleted = await db
-    .delete(insights)
-    .where(
-      and(eq(insights.id, insightId), eq(insights.organisationId, organisationId))
-    )
-    .returning({ id: insights.id });
+  return withOrgContext(organisationId, async tx => {
+    const deleted = await tx
+      .delete(insights)
+      .where(
+        and(eq(insights.id, insightId), eq(insights.organisationId, organisationId))
+      )
+      .returning({ id: insights.id });
 
-  return deleted.length > 0;
+    return deleted.length > 0;
+  });
 }

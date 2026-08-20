@@ -405,8 +405,8 @@
         }
       },
       "indexes": {
-        "insights_org_status_idx": {
-          "name": "insights_org_status_idx",
+        "idx_insights_org_status": {
+          "name": "idx_insights_org_status",
           "columns": [
             {
               "expression": "organisation_id",

@@ -1,4 +1,4 @@
-import { db } from "@db/index";
+import { withOrgContext } from "@db/index";
 import {
   Transaction,
   TransactionSource,
@@ -87,13 +87,15 @@ export async function listTransactions(
   const limit = filters.limit && filters.limit > 0 ? Math.min(filters.limit, 500) : 500;
   const offset = filters.offset && filters.offset > 0 ? filters.offset : 0;
 
-  return db
-    .select()
-    .from(transactions)
-    .where(and(...conditions))
-    .orderBy(desc(transactions.occurredAt), desc(transactions.createdAt))
-    .limit(limit)
-    .offset(offset);
+  return withOrgContext(organisationId, tx =>
+    tx
+      .select()
+      .from(transactions)
+      .where(and(...conditions))
+      .orderBy(desc(transactions.occurredAt), desc(transactions.createdAt))
+      .limit(limit)
+      .offset(offset)
+  );
 }
 
 export async function createTransactions(
@@ -132,19 +134,21 @@ export async function createTransactions(
     };
   });
 
-  const inserted = await db
-    .insert(transactions)
-    .values(rows)
-    .onConflictDoNothing({
-      target: [transactions.organisationId, transactions.dedupeKey],
-    })
-    .returning();
+  return withOrgContext(organisationId, async tx => {
+    const inserted = await tx
+      .insert(transactions)
+      .values(rows)
+      .onConflictDoNothing({
+        target: [transactions.organisationId, transactions.dedupeKey],
+      })
+      .returning();
 
-  return {
-    inserted,
-    skipped: rows.length - inserted.length,
-    importBatchId,
-  };
+    return {
+      inserted,
+      skipped: rows.length - inserted.length,
+      importBatchId,
+    };
+  });
 }
 
 export async function updateTransaction(
@@ -152,84 +156,88 @@ export async function updateTransaction(
   transactionId: string,
   input: UpdateTransactionInput
 ): Promise<Transaction | null> {
-  const [existing] = await db
-    .select()
-    .from(transactions)
-    .where(
-      and(
-        eq(transactions.id, transactionId),
-        eq(transactions.organisationId, organisationId)
+  return withOrgContext(organisationId, async tx => {
+    const [existing] = await tx
+      .select()
+      .from(transactions)
+      .where(
+        and(
+          eq(transactions.id, transactionId),
+          eq(transactions.organisationId, organisationId)
+        )
       )
-    )
-    .limit(1);
+      .limit(1);
 
-  if (!existing) {
-    return null;
-  }
+    if (!existing) {
+      return null;
+    }
 
-  const occurredAt = input.occurredAt ?? existing.occurredAt;
-  const description = input.description?.trim() ?? existing.description;
-  const amount = input.amount !== undefined
-    ? normaliseMoneyAmount(input.amount)
-    : existing.amount;
+    const occurredAt = input.occurredAt ?? existing.occurredAt;
+    const description = input.description?.trim() ?? existing.description;
+    const amount = input.amount !== undefined
+      ? normaliseMoneyAmount(input.amount)
+      : existing.amount;
 
-  if (!isIsoDate(occurredAt)) {
-    throw new Error(`occurredAt must be YYYY-MM-DD (got "${occurredAt}").`);
-  }
-  if (!description) {
-    throw new Error("description is required.");
-  }
+    if (!isIsoDate(occurredAt)) {
+      throw new Error(`occurredAt must be YYYY-MM-DD (got "${occurredAt}").`);
+    }
+    if (!description) {
+      throw new Error("description is required.");
+    }
 
-  const [updated] = await db
-    .update(transactions)
-    .set({
-      occurredAt,
-      description,
-      amount,
-      merchant:
-        input.merchant !== undefined
-          ? input.merchant?.trim() || null
-          : existing.merchant,
-      category:
-        input.category !== undefined
-          ? input.category?.trim() || null
-          : existing.category,
-      account:
-        input.account !== undefined
-          ? input.account?.trim() || null
-          : existing.account,
-      notes:
-        input.notes !== undefined ? input.notes?.trim() || null : existing.notes,
-      currency: input.currency?.trim() || existing.currency,
-      dedupeKey: computeDedupeKey(occurredAt, amount, description),
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(transactions.id, transactionId),
-        eq(transactions.organisationId, organisationId)
+    const [updated] = await tx
+      .update(transactions)
+      .set({
+        occurredAt,
+        description,
+        amount,
+        merchant:
+          input.merchant !== undefined
+            ? input.merchant?.trim() || null
+            : existing.merchant,
+        category:
+          input.category !== undefined
+            ? input.category?.trim() || null
+            : existing.category,
+        account:
+          input.account !== undefined
+            ? input.account?.trim() || null
+            : existing.account,
+        notes:
+          input.notes !== undefined ? input.notes?.trim() || null : existing.notes,
+        currency: input.currency?.trim() || existing.currency,
+        dedupeKey: computeDedupeKey(occurredAt, amount, description),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(transactions.id, transactionId),
+          eq(transactions.organisationId, organisationId)
+        )
       )
-    )
-    .returning();
+      .returning();
 
-  return updated ?? null;
+    return updated ?? null;
+  });
 }
 
 export async function deleteTransaction(
   organisationId: string,
   transactionId: string
 ): Promise<boolean> {
-  const deleted = await db
-    .delete(transactions)
-    .where(
-      and(
-        eq(transactions.id, transactionId),
-        eq(transactions.organisationId, organisationId)
+  return withOrgContext(organisationId, async tx => {
+    const deleted = await tx
+      .delete(transactions)
+      .where(
+        and(
+          eq(transactions.id, transactionId),
+          eq(transactions.organisationId, organisationId)
+        )
       )
-    )
-    .returning({ id: transactions.id });
+      .returning({ id: transactions.id });
 
-  return deleted.length > 0;
+    return deleted.length > 0;
+  });
 }
 
 export async function summariseSpendByCategory(
@@ -245,15 +253,15 @@ export async function summariseSpendByCategory(
     conditions.push(lte(transactions.occurredAt, filters.toDate));
   }
 
-  const rows = await db
-    .select({
-      category: sql<string>`coalesce(${transactions.category}, 'Uncategorised')`,
-      total: sql<string>`coalesce(sum(${transactions.amount}), 0)::text`,
-      count: sql<number>`count(*)::int`,
-    })
-    .from(transactions)
-    .where(and(...conditions))
-    .groupBy(sql`coalesce(${transactions.category}, 'Uncategorised')`);
-
-  return rows;
+  return withOrgContext(organisationId, tx =>
+    tx
+      .select({
+        category: sql<string>`coalesce(${transactions.category}, 'Uncategorised')`,
+        total: sql<string>`coalesce(sum(${transactions.amount}), 0)::text`,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(transactions)
+      .where(and(...conditions))
+      .groupBy(sql`coalesce(${transactions.category}, 'Uncategorised')`)
+  );
 }

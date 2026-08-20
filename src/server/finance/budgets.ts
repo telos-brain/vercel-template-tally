@@ -1,4 +1,4 @@
-import { db } from "@db/index";
+import { withOrgContext } from "@db/index";
 import { Budget, BudgetPeriod, budgets, transactions } from "@db/schema";
 import {
   DEFAULT_CURRENCY,
@@ -83,11 +83,13 @@ export function currentPeriodWindow(
 }
 
 export async function listBudgets(organisationId: string): Promise<Budget[]> {
-  return db
-    .select()
-    .from(budgets)
-    .where(eq(budgets.organisationId, organisationId))
-    .orderBy(budgets.category, budgets.startsOn);
+  return withOrgContext(organisationId, tx =>
+    tx
+      .select()
+      .from(budgets)
+      .where(eq(budgets.organisationId, organisationId))
+      .orderBy(budgets.category, budgets.startsOn)
+  );
 }
 
 export async function upsertBudget(
@@ -117,31 +119,33 @@ export async function upsertBudget(
     updatedAt: new Date(),
   };
 
-  const [row] = await db
-    .insert(budgets)
-    .values(values)
-    .onConflictDoUpdate({
-      target: [
-        budgets.organisationId,
-        budgets.category,
-        budgets.period,
-        budgets.startsOn,
-      ],
-      set: {
-        amount: values.amount,
-        currency: values.currency,
-        endsOn: values.endsOn,
-        notes: values.notes,
-        updatedAt: values.updatedAt,
-      },
-    })
-    .returning();
+  return withOrgContext(organisationId, async tx => {
+    const [row] = await tx
+      .insert(budgets)
+      .values(values)
+      .onConflictDoUpdate({
+        target: [
+          budgets.organisationId,
+          budgets.category,
+          budgets.period,
+          budgets.startsOn,
+        ],
+        set: {
+          amount: values.amount,
+          currency: values.currency,
+          endsOn: values.endsOn,
+          notes: values.notes,
+          updatedAt: values.updatedAt,
+        },
+      })
+      .returning();
 
-  if (!row) {
-    throw new Error("Budget was not saved.");
-  }
+    if (!row) {
+      throw new Error("Budget was not saved.");
+    }
 
-  return row;
+    return row;
+  });
 }
 
 export async function updateBudget(
@@ -149,106 +153,116 @@ export async function updateBudget(
   budgetId: string,
   input: Partial<UpsertBudgetInput>
 ): Promise<Budget | null> {
-  const [existing] = await db
-    .select()
-    .from(budgets)
-    .where(and(eq(budgets.id, budgetId), eq(budgets.organisationId, organisationId)))
-    .limit(1);
+  return withOrgContext(organisationId, async tx => {
+    const [existing] = await tx
+      .select()
+      .from(budgets)
+      .where(and(eq(budgets.id, budgetId), eq(budgets.organisationId, organisationId)))
+      .limit(1);
 
-  if (!existing) {
-    return null;
-  }
+    if (!existing) {
+      return null;
+    }
 
-  const startsOn = input.startsOn ?? existing.startsOn;
-  const endsOn =
-    input.endsOn !== undefined ? input.endsOn : existing.endsOn;
-  if (!isIsoDate(startsOn)) {
-    throw new Error(`startsOn must be YYYY-MM-DD (got "${startsOn}").`);
-  }
-  if (endsOn && !isIsoDate(endsOn)) {
-    throw new Error(`endsOn must be YYYY-MM-DD (got "${endsOn}").`);
-  }
+    const startsOn = input.startsOn ?? existing.startsOn;
+    const endsOn =
+      input.endsOn !== undefined ? input.endsOn : existing.endsOn;
+    if (!isIsoDate(startsOn)) {
+      throw new Error(`startsOn must be YYYY-MM-DD (got "${startsOn}").`);
+    }
+    if (endsOn && !isIsoDate(endsOn)) {
+      throw new Error(`endsOn must be YYYY-MM-DD (got "${endsOn}").`);
+    }
 
-  const [updated] = await db
-    .update(budgets)
-    .set({
-      category: input.category?.trim() || existing.category,
-      period: input.period ?? existing.period,
-      amount:
-        input.amount !== undefined
-          ? normaliseMoneyAmount(input.amount)
-          : existing.amount,
-      currency: input.currency?.trim() || existing.currency,
-      startsOn,
-      endsOn: endsOn ?? null,
-      notes:
-        input.notes !== undefined ? input.notes?.trim() || null : existing.notes,
-      updatedAt: new Date(),
-    })
-    .where(and(eq(budgets.id, budgetId), eq(budgets.organisationId, organisationId)))
-    .returning();
+    const [updated] = await tx
+      .update(budgets)
+      .set({
+        category: input.category?.trim() || existing.category,
+        period: input.period ?? existing.period,
+        amount:
+          input.amount !== undefined
+            ? normaliseMoneyAmount(input.amount)
+            : existing.amount,
+        currency: input.currency?.trim() || existing.currency,
+        startsOn,
+        endsOn: endsOn ?? null,
+        notes:
+          input.notes !== undefined ? input.notes?.trim() || null : existing.notes,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(budgets.id, budgetId), eq(budgets.organisationId, organisationId)))
+      .returning();
 
-  return updated ?? null;
+    return updated ?? null;
+  });
 }
 
 export async function deleteBudget(
   organisationId: string,
   budgetId: string
 ): Promise<boolean> {
-  const deleted = await db
-    .delete(budgets)
-    .where(and(eq(budgets.id, budgetId), eq(budgets.organisationId, organisationId)))
-    .returning({ id: budgets.id });
+  return withOrgContext(organisationId, async tx => {
+    const deleted = await tx
+      .delete(budgets)
+      .where(and(eq(budgets.id, budgetId), eq(budgets.organisationId, organisationId)))
+      .returning({ id: budgets.id });
 
-  return deleted.length > 0;
+    return deleted.length > 0;
+  });
 }
 
 export async function getBudgetProgress(
   organisationId: string
 ): Promise<BudgetProgress[]> {
-  const orgBudgets = await listBudgets(organisationId);
-  const today = todayIsoDate();
+  return withOrgContext(organisationId, async tx => {
+    const orgBudgets = await tx
+      .select()
+      .from(budgets)
+      .where(eq(budgets.organisationId, organisationId))
+      .orderBy(budgets.category, budgets.startsOn);
+    const today = todayIsoDate();
 
-  const progress: BudgetProgress[] = [];
+    const progress: BudgetProgress[] = [];
 
-  for (const budget of orgBudgets) {
-    const window = currentPeriodWindow(
-      budget.startsOn,
-      budget.period,
-      today,
-      budget.endsOn
-    );
-
-    const [spend] = await db
-      .select({
-        spent: sql<string>`coalesce(sum(case when ${transactions.amount}::numeric < 0 then -${transactions.amount}::numeric else 0 end), 0)::text`,
-      })
-      .from(transactions)
-      .where(
-        and(
-          eq(transactions.organisationId, organisationId),
-          eq(transactions.category, budget.category),
-          gte(transactions.occurredAt, window.start),
-          lte(transactions.occurredAt, window.end)
-        )
+    for (const budget of orgBudgets) {
+      const window = currentPeriodWindow(
+        budget.startsOn,
+        budget.period,
+        today,
+        budget.endsOn
       );
 
-    const spent = spend?.spent ?? "0.00";
-    const budgetAmount = Number.parseFloat(budget.amount);
-    const spentAmount = Number.parseFloat(spent);
-    const remaining = (budgetAmount - spentAmount).toFixed(2);
-    const percentUsed =
-      budgetAmount > 0 ? Math.round((spentAmount / budgetAmount) * 100) : 0;
+      const [spend] = await tx
+        .select({
+          spent: sql<string>`coalesce(sum(case when ${transactions.amount}::numeric < 0 then -${transactions.amount}::numeric else 0 end), 0)::text`,
+        })
+        .from(transactions)
+        .where(
+          and(
+            eq(transactions.organisationId, organisationId),
+            eq(transactions.category, budget.category),
+            gte(transactions.occurredAt, window.start),
+            lte(transactions.occurredAt, window.end)
+          )
+        );
 
-    progress.push({
-      ...budget,
-      periodStart: window.start,
-      periodEnd: window.end,
-      spent,
-      remaining,
-      percentUsed,
-    });
-  }
+      const spent = spend?.spent ?? "0.00";
+      const budgetAmount = Number.parseFloat(budget.amount);
+      const spentAmount = Number.parseFloat(spent);
+      const remaining = (budgetAmount - spentAmount).toFixed(2);
+      const percentUsed =
+        budgetAmount > 0 ? Math.round((spentAmount / budgetAmount) * 100) : 0;
 
-  return progress;
+      progress.push({
+        ...budget,
+        periodStart: window.start,
+        periodEnd: window.end,
+        spent,
+        remaining,
+        percentUsed,
+      });
+    }
+
+    return progress;
+  });
 }
