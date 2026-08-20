@@ -24,8 +24,8 @@ After setup you can open **Chat** and paste a bank statement (`samples/bank-stat
 ## 1. Clone and install
 
 ```bash
-git clone <repository-url>
-cd <your-repository-folder>
+git clone https://github.com/telos-brain/vercel-template-tally.git
+cd vercel-template-tally
 npm install
 ```
 
@@ -147,6 +147,8 @@ npm run stack:reset   # stop this repo's Brain (--reset) and Supabase
 ```
 
 ## Stage and production (Vercel + Telos Hosted)
+
+First-time walkthrough (real screens for Telos Hosted, GitHub import, and the Clerk / Supabase / Vercel sign-in pages): [docs/hosted-deploy.md](docs/hosted-deploy.md).
 
 Use local Docker Brain for **dev** only. For Preview and Production, Vercel deploys the Next.js app **and** the `brain/` schema together, the same way it applies Drizzle migrations. Sign up at [Telos Hosted](https://go.telosbrain.com) (includes $10 free credit) and mint an organisation API key.
 
