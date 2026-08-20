@@ -1,4 +1,4 @@
-import { db } from "@db/index";
+import { withOrgContext, type DbTransaction } from "@db/index";
 import {
   ChatMessage,
   ChatMessageRole,
@@ -22,34 +22,64 @@ const HISTORY_MESSAGE_LIMIT = 40;
 
 export { deriveSessionTitle };
 
+function ownedSessionClause(
+  organisationId: string,
+  sessionId: string,
+  createdByUserId: string
+) {
+  return and(
+    eq(chatSessions.id, sessionId),
+    eq(chatSessions.organisationId, organisationId),
+    eq(chatSessions.createdByUserId, createdByUserId)
+  );
+}
+
+async function getOwnedSession(
+  tx: DbTransaction,
+  organisationId: string,
+  sessionId: string,
+  createdByUserId: string
+): Promise<ChatSession | null> {
+  const [session] = await tx
+    .select()
+    .from(chatSessions)
+    .where(ownedSessionClause(organisationId, sessionId, createdByUserId))
+    .limit(1);
+
+  return session ?? null;
+}
+
 export async function listSessions(
   organisationId: string,
   createdByUserId?: string
 ): Promise<ChatSession[]> {
-  const conditions = [
-    eq(chatSessions.organisationId, organisationId),
-    isNull(chatSessions.archivedAt),
-  ];
+  return withOrgContext(organisationId, async tx => {
+    const conditions = [
+      eq(chatSessions.organisationId, organisationId),
+      isNull(chatSessions.archivedAt),
+    ];
 
-  if (createdByUserId) {
-    conditions.push(eq(chatSessions.createdByUserId, createdByUserId));
-  }
+    if (createdByUserId) {
+      conditions.push(eq(chatSessions.createdByUserId, createdByUserId));
+    }
 
-  const sessions = await db
-    .select()
-    .from(chatSessions)
-    .where(and(...conditions))
-    .orderBy(desc(chatSessions.lastMessageAt));
+    const sessions = await tx
+      .select()
+      .from(chatSessions)
+      .where(and(...conditions))
+      .orderBy(desc(chatSessions.lastMessageAt));
 
-  return refreshLegacySessionTitles(sessions);
+    return refreshLegacySessionTitles(tx, sessions);
+  });
 }
 
 async function refreshLegacySessionTitles(
+  tx: DbTransaction,
   sessions: ChatSession[]
 ): Promise<ChatSession[]> {
   if (sessions.length === 0) return sessions;
 
-  const firstMessages = await db
+  const firstMessages = await tx
     .select({
       sessionId: chatMessages.sessionId,
       content: chatMessages.content,
@@ -82,7 +112,7 @@ async function refreshLegacySessionTitles(
       }
       const title = deriveSessionTitle(first);
       if (title === session.title) return;
-      await db
+      await tx
         .update(chatSessions)
         .set({ title, updatedAt: new Date() })
         .where(eq(chatSessions.id, session.id));
@@ -98,28 +128,18 @@ export async function createSession(
   createdByUserId: string,
   title = "New chat"
 ): Promise<ChatSession> {
-  const [session] = await db
-    .insert(chatSessions)
-    .values({
-      organisationId,
-      createdByUserId,
-      title,
-    })
-    .returning();
+  return withOrgContext(organisationId, async tx => {
+    const [session] = await tx
+      .insert(chatSessions)
+      .values({
+        organisationId,
+        createdByUserId,
+        title,
+      })
+      .returning();
 
-  return session;
-}
-
-function ownedSessionClause(
-  organisationId: string,
-  sessionId: string,
-  createdByUserId: string
-) {
-  return and(
-    eq(chatSessions.id, sessionId),
-    eq(chatSessions.organisationId, organisationId),
-    eq(chatSessions.createdByUserId, createdByUserId)
-  );
+    return session;
+  });
 }
 
 export async function getSession(
@@ -127,13 +147,9 @@ export async function getSession(
   sessionId: string,
   createdByUserId: string
 ): Promise<ChatSession | null> {
-  const [session] = await db
-    .select()
-    .from(chatSessions)
-    .where(ownedSessionClause(organisationId, sessionId, createdByUserId))
-    .limit(1);
-
-  return session ?? null;
+  return withOrgContext(organisationId, tx =>
+    getOwnedSession(tx, organisationId, sessionId, createdByUserId)
+  );
 }
 
 export async function getSessionMessages(
@@ -141,16 +157,23 @@ export async function getSessionMessages(
   sessionId: string,
   createdByUserId: string
 ): Promise<ChatMessage[]> {
-  const session = await getSession(organisationId, sessionId, createdByUserId);
-  if (!session) {
-    return [];
-  }
+  return withOrgContext(organisationId, async tx => {
+    const session = await getOwnedSession(
+      tx,
+      organisationId,
+      sessionId,
+      createdByUserId
+    );
+    if (!session) {
+      return [];
+    }
 
-  return db
-    .select()
-    .from(chatMessages)
-    .where(eq(chatMessages.sessionId, sessionId))
-    .orderBy(chatMessages.createdAt);
+    return tx
+      .select()
+      .from(chatMessages)
+      .where(eq(chatMessages.sessionId, sessionId))
+      .orderBy(chatMessages.createdAt);
+  });
 }
 
 export async function getRecentSessionHistory(
@@ -179,33 +202,40 @@ export async function appendMessage(
   content: string,
   createdByUserId: string
 ): Promise<ChatMessage> {
-  const session = await getSession(organisationId, sessionId, createdByUserId);
-  if (!session) {
-    throw new Error("Chat session not found.");
-  }
-
-  const [message] = await db
-    .insert(chatMessages)
-    .values({
+  return withOrgContext(organisationId, async tx => {
+    const session = await getOwnedSession(
+      tx,
+      organisationId,
       sessionId,
-      role,
-      content,
-    })
-    .returning();
+      createdByUserId
+    );
+    if (!session) {
+      throw new Error("Chat session not found.");
+    }
 
-  const shouldSetTitle =
-    role === "user" && (session.title === "New chat" || !session.title);
+    const [message] = await tx
+      .insert(chatMessages)
+      .values({
+        sessionId,
+        role,
+        content,
+      })
+      .returning();
 
-  await db
-    .update(chatSessions)
-    .set({
-      lastMessageAt: new Date(),
-      updatedAt: new Date(),
-      ...(shouldSetTitle ? { title: deriveSessionTitle(content) } : {}),
-    })
-    .where(ownedSessionClause(organisationId, sessionId, createdByUserId));
+    const shouldSetTitle =
+      role === "user" && (session.title === "New chat" || !session.title);
 
-  return message;
+    await tx
+      .update(chatSessions)
+      .set({
+        lastMessageAt: new Date(),
+        updatedAt: new Date(),
+        ...(shouldSetTitle ? { title: deriveSessionTitle(content) } : {}),
+      })
+      .where(ownedSessionClause(organisationId, sessionId, createdByUserId));
+
+    return message;
+  });
 }
 
 /**
@@ -268,16 +298,18 @@ export async function renameSession(
     throw new Error("title is required.");
   }
 
-  const [updated] = await db
-    .update(chatSessions)
-    .set({
-      title: trimmed.slice(0, 80),
-      updatedAt: new Date(),
-    })
-    .where(ownedSessionClause(organisationId, sessionId, createdByUserId))
-    .returning();
+  return withOrgContext(organisationId, async tx => {
+    const [updated] = await tx
+      .update(chatSessions)
+      .set({
+        title: trimmed.slice(0, 80),
+        updatedAt: new Date(),
+      })
+      .where(ownedSessionClause(organisationId, sessionId, createdByUserId))
+      .returning();
 
-  return updated ?? null;
+    return updated ?? null;
+  });
 }
 
 export async function deleteSession(
@@ -285,10 +317,12 @@ export async function deleteSession(
   sessionId: string,
   createdByUserId: string
 ): Promise<boolean> {
-  const deleted = await db
-    .delete(chatSessions)
-    .where(ownedSessionClause(organisationId, sessionId, createdByUserId))
-    .returning({ id: chatSessions.id });
+  return withOrgContext(organisationId, async tx => {
+    const deleted = await tx
+      .delete(chatSessions)
+      .where(ownedSessionClause(organisationId, sessionId, createdByUserId))
+      .returning({ id: chatSessions.id });
 
-  return deleted.length > 0;
+    return deleted.length > 0;
+  });
 }

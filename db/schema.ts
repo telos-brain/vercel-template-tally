@@ -253,7 +253,7 @@ export const insights = pgTable(
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
-  table => [index("insights_org_status_idx").on(table.organisationId, table.status)]
+  table => [index("idx_insights_org_status").on(table.organisationId, table.status)]
 );
 
 export const chatMessages = pgTable("chat_messages", {

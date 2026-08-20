@@ -1,12 +1,29 @@
-import { config } from 'dotenv';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import postgres from 'postgres';
+import { config } from "dotenv";
+import { sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 
-config({ path: '.env' }); // or .env.local
+config({ path: ".env" }); // or .env.local
 
 if (!process.env.POSTGRES_URL) {
-  throw new Error('POSTGRES_URL environment variable is not set');
+  throw new Error("POSTGRES_URL environment variable is not set");
 }
 
 const client = postgres(process.env.POSTGRES_URL);
 export const db = drizzle({ client });
+
+export type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Sets `app.org_id` for the duration of a transaction so RLS policies can
+ * scope rows. Queries on RLS-forced tables must run inside this helper.
+ */
+export const withOrgContext = async <T>(
+  organisationId: string,
+  fn: (tx: DbTransaction) => Promise<T>
+): Promise<T> => {
+  return db.transaction(async tx => {
+    await tx.execute(sql`SELECT set_config('app.org_id', ${organisationId}, true)`);
+    return fn(tx);
+  });
+};
