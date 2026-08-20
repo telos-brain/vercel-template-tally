@@ -190,7 +190,17 @@ Detected keys do **not** include `TELOS_BRAIN_ORG_API_KEY`, `ANTHROPIC_API_KEY`,
 
 Click **Deploy**. While it runs: **Deployment started … ago…**, **Build Logs**, **Deploying schema…**. Success: **Congratulations! You just deployed a new project to …**. Preview shows Clerk **Sign in** on the TALLY welcome page.
 
-Production aliases look like `<project>-<team>.vercel.app` (primary), plus a `*-git-main-*` alias and a per-deployment URL. Deployments list: **Ready**, **Production**, branch **main**. After the first deploy, set `NEXT_PUBLIC_SITE_URL` to that primary URL (optional extra hostname: `BRAIN_CALLBACK_DOMAIN`).
+Production aliases look like `<project>-<team>.vercel.app` (primary), plus a `*-git-main-*` alias and a per-deployment URL. Deployments list: **Ready**, **Production**, branch **main**. After the first deploy, set `NEXT_PUBLIC_SITE_URL` to that primary URL (optional extra hostname: `BRAIN_CALLBACK_DOMAIN`). Also set `MY_APP_API_URL` to that same `https://…` URL if Vercel imported `http://host.docker.internal:3000` from `.env.example` — Telos Hosted cannot call Docker.
+
+### Deployment Protection (do this before Chat tools)
+
+Hobby projects often enable **Vercel Authentication** (commonly **Standard Protection**). You can still open the app in the browser because you are on the Vercel team. Telos Hosted is not: Brain tool webhooks (`POST /api/tools/…`) get `401 Protected deployment` with `vercel_auth_enabled: true`. Chat can look fine while `record_transactions` fails.
+
+This is **project-wide**. There is no exception for `/api/tools/*`. Standard Protection is *meant* to leave the production domain public, but a production `*.vercel.app` alias can still be gated — treat the HTTP response as the source of truth.
+
+**Required check:** `POST` your production `/api/tools/recordTransactions` (or any `/api/tools/…`). If the body is `Protected deployment` / `vercel_auth_enabled`, turn **Vercel Authentication off** (**Settings → Deployment Protection**). Clerk remains the app login. Saving the setting applies to existing deployments — no redeploy required.
+
+This template’s finance tools do **not** send `x-vercel-protection-bypass`. [Protection Bypass for Automation](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation) only works if you add that header to the tool YAML and a Brain env secret. Leave Production SSO off unless you do that extra wiring.
 
 ### Environment variables
 
@@ -208,6 +218,7 @@ Minimum for a first Brain-enabled deploy:
 | `POSTGRES_URL` | Hosted Postgres |
 | Clerk + Supabase vars | From steps 3–4 |
 | `NEXT_PUBLIC_SITE_URL` | Public app URL |
+| `MY_APP_API_URL` | Optional. Public `https://` app URL the Brain calls for tools. Default: Vercel production / Preview URL. Override if `.env.example` imported `host.docker.internal`. |
 
 Leave **`BRAIN_API_KEY` empty** on the first deploy (or set `BRAIN_DEPLOY=0` if you only want the Next.js app + migrations while you debug). Do **not** paste the local Docker execution key.
 
@@ -237,7 +248,12 @@ Redeploy so the app **and** the brain pick up `BRAIN_API_KEY` for tool callbacks
 
 Open the Vercel URL, sign in with Clerk, create/select an organisation if prompted, open **Chat**, send a message (workflow `WF-CHAT`). Titles generate via `WF-CHAT-TITLE`. You can paste `samples/bank-statement.txt`.
 
-If Chat says Brain is not configured, `BRAIN_URL` or `BRAIN_API_KEY` is missing for that environment. If tools never hit the Vercel app, check `allowed-callback-domains` / `MY_APP_API_URL` still being a placeholder after the first hosted deploy.
+If Chat says Brain is not configured, `BRAIN_URL` or `BRAIN_API_KEY` is missing for that environment.
+
+Chat is **app → Brain**. Tools such as `record_transactions` are **Brain → your Vercel URL**. After a first Chat message works, paste `samples/bank-statement.txt` to prove the webhook path. Two host-side blocks look similar (parsed rows, import never lands):
+
+1. **Vercel Authentication** — `401 Protected deployment`. See **Deployment Protection** above. Your browser has a Vercel SSO cookie; the Brain does not.
+2. **Callback allowlist** — `The tool 'record_transactions' webhook URL was blocked for safety: URL host is not in the allowed callback domains.` Set `MY_APP_API_URL` to the public production URL, then redeploy so `brain:deploy` merges that hostname into `allowed-callback-domains` (exact hosts only; no wildcards). Optional extra host: `BRAIN_CALLBACK_DOMAIN`.
 
 ## Troubleshooting
 
@@ -249,6 +265,8 @@ If Chat says Brain is not configured, `BRAIN_URL` or `BRAIN_API_KEY` is missing 
 | Empty **Brains** after Vercel deploy | Check the Vercel build log for `brain:deploy`; confirm `TELOS_BRAIN_ORG_API_KEY` |
 | Skip Brain deploy while debugging | Set `BRAIN_DEPLOY=0` (app + Drizzle still deploy) |
 | Auth failures on hosted Chat | You reused local Docker `BRAIN_API_KEY` — use the key from the hosted build log |
+| Chat works; tools 401 `Protected deployment` | Vercel Authentication is gating the production URL. **Settings → Deployment Protection** — turn it **off**. Standard Protection is not a guaranteed fix. Not a `TOOL_API_KEY` mismatch (that JSON error is `Invalid or missing tool API key`). This template does not send `x-vercel-protection-bypass`. |
+| Chat works; `webhook URL was blocked for safety` | Hostname of `MY_APP_API_URL` is missing from `allowed-callback-domains`. Point `MY_APP_API_URL` at `https://<project>-<team>.vercel.app` (not `host.docker.internal`) and redeploy so `brain:deploy` merges the host. |
 | Chat 502 / `relation "chat_sessions" does not exist` | Current template `main` already ships `0001_*.sql` for chat, finance, and insights. If you still see this, the GitHub repo Vercel is building is older than that — merge https://github.com/telos-brain/vercel-template-tally.git `main` and redeploy. Do not run `db:push` on Vercel. |
 | Go empty-state `brain init` | Do not run it in this repo; `brain/` already exists |
 

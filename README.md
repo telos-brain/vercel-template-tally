@@ -204,10 +204,10 @@ Do not commit `.env`, `brain/.env.local`, `brain/.env.stage`, `brain/.env.prod`,
 | Chat: Brain is not configured | App `.env` missing `BRAIN_URL` or `BRAIN_API_KEY` |
 | `BRAIN_API_KEY was not announced` | Leftover local Brain Docker volume; the execution key is shown only once at create. `prepare` resets that volume when neither env file has a real key. Manual recovery: `npm run stack:reset`, then `npm run prepare` |
 | Tools never hit Next.js | `MY_APP_API_URL` used `localhost` instead of `http://host.docker.internal:3000` |
-| Tool webhook 401 | `TOOL_API_KEY` ≠ `MY_APP_API_KEY`, or Brain keys differ |
+| Tool webhook 401 | If the body is `Protected deployment` / `vercel_auth_enabled`, Vercel Authentication is blocking Brain (see [docs/hosted-deploy.md](docs/hosted-deploy.md) Deployment Protection). If the body is `Invalid or missing tool API key`, `TOOL_API_KEY` ≠ `MY_APP_API_KEY` or Brain keys differ |
 | Deploy fails on embeddings | Blank `VOYAGE_API_KEY` in the Vercel env (or brain env file) |
 | Vercel build fails at `brain:deploy` | Missing `TELOS_BRAIN_ORG_API_KEY` / `ANTHROPIC_API_KEY` / `VOYAGE_API_KEY` / `TOOL_API_KEY`. Set `BRAIN_DEPLOY=0` to ship the app first |
-| Tools never hit the Vercel app | Hostname missing from `allowed-callback-domains`, or `MY_APP_API_URL` / `BRAIN_API_KEY` still a placeholder after first hosted deploy |
+| Tools never hit the Vercel app | Hostname missing from `allowed-callback-domains`, or `MY_APP_API_URL` / `BRAIN_API_KEY` still a placeholder after first hosted deploy. Hosted `MY_APP_API_URL` must be the public `https://` app URL, not `host.docker.internal` |
 | Port 1433 already allocated | Change `sql_port` in `brain/brain.config.toml`, then `brain start` again |
 | Version conflict on redeploy | `brain snapshot --env local --instance local-brain` then deploy |
 
