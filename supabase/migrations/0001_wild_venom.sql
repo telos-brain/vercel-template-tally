@@ -131,11 +131,13 @@ DO $$ BEGIN
  ALTER TABLE "budgets" ADD CONSTRAINT "budgets_org_category_period_start_unique" UNIQUE("organisation_id","category","period","starts_on");
 EXCEPTION
  WHEN duplicate_object THEN null;
+ WHEN duplicate_table THEN null;
 END $$;--> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "transactions" ADD CONSTRAINT "transactions_org_dedupe_unique" UNIQUE("organisation_id","dedupe_key");
 EXCEPTION
  WHEN duplicate_object THEN null;
+ WHEN duplicate_table THEN null;
 END $$;--> statement-breakpoint
 ALTER TABLE "budgets" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 ALTER TABLE "budgets" FORCE ROW LEVEL SECURITY;--> statement-breakpoint
