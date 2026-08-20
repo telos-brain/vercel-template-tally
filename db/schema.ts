@@ -267,7 +267,7 @@ export const insights = pgTable(
       .on(
         table.organisationId,
         table.category,
-        sql`((${table.createdAt} AT TIME ZONE 'UTC')::date)`
+        sql`((${table.createdAt})::date)`
       )
       .where(sql`${table.status} = 'ready'`),
   ]
