@@ -91,6 +91,11 @@ function main() {
   });
 
   const callbackHosts = collectCallbackHosts(appUrl);
+  if (process.env.VERCEL && callbackHosts.length === 0) {
+    throwFail(
+      "No public callback hosts to allowlist. Set MY_APP_API_URL to the https:// production app URL.",
+    );
+  }
   writeFileSync(deployComposePath, mergeCallbackDomains(readFileSync(composePath, "utf8"), callbackHosts));
 
   const childEnv = {
@@ -187,6 +192,31 @@ function assertInstanceName(name) {
 
 function resolveAppUrl() {
   const explicit = keepIfSet(process.env.MY_APP_API_URL);
+  const productionHost = keepIfSet(process.env.VERCEL_PROJECT_PRODUCTION_URL);
+  const vercelUrl = keepIfSet(process.env.VERCEL_URL);
+  const productionUrl =
+    productionHost && !isLocalAppUrl(productionHost)
+      ? withHttps(productionHost)
+      : undefined;
+
+  // Unique per-deploy Vercel URLs change every build and are easy to allowlist
+  // miss. Production always uses the stable project URL when Vercel provides it.
+  if (process.env.VERCEL_ENV === "production" && productionUrl) {
+    if (
+      !explicit ||
+      isLocalAppUrl(explicit) ||
+      hostsEqual(explicit, vercelUrl) ||
+      hostsEqual(explicit, productionHost)
+    ) {
+      if (explicit && isLocalAppUrl(explicit)) {
+        console.log(
+          `Ignoring MY_APP_API_URL=${explicit} — Telos Hosted cannot call Docker/loopback. Using ${productionUrl}.`,
+        );
+      }
+      return productionUrl;
+    }
+  }
+
   if (explicit && !isLocalAppUrl(explicit)) {
     return withHttps(explicit);
   }
@@ -196,14 +226,10 @@ function resolveAppUrl() {
     );
   }
 
-  if (process.env.VERCEL_ENV === "production") {
-    const productionHost = keepIfSet(process.env.VERCEL_PROJECT_PRODUCTION_URL);
-    if (productionHost && !isLocalAppUrl(productionHost)) {
-      return withHttps(productionHost);
-    }
+  if (productionUrl) {
+    return productionUrl;
   }
 
-  const vercelUrl = keepIfSet(process.env.VERCEL_URL);
   if (vercelUrl && !isLocalAppUrl(vercelUrl)) {
     return withHttps(vercelUrl);
   }
@@ -221,6 +247,12 @@ function resolveAppUrl() {
 function isLocalAppUrl(value) {
   const host = hostnameFrom(value);
   return Boolean(host && LOCAL_HOSTS.has(host));
+}
+
+function hostsEqual(left, right) {
+  const a = hostnameFrom(left);
+  const b = hostnameFrom(right);
+  return Boolean(a && b && a === b);
 }
 
 function isPublicHttpsHost(value) {
