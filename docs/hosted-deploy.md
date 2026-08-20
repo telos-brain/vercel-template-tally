@@ -215,7 +215,7 @@ Optional: `BRAIN_INSTANCE` defaults to `{VERCEL_PROJECT_NAME}-prod` or `{VERCEL_
 
 ## 6. First deploy — copy the execution key
 
-On Vercel, `npm run build` runs `db:migrate`, then `brain:deploy` (to go.telosbrain.com), then `next build`.
+On Vercel, `npm run build` runs `db:migrate`, then `brain:deploy` (to go.telosbrain.com), then `next build`. `db:migrate` applies every file in `supabase/migrations/`, including `0001_*.sql` (chat, transactions, budgets, insights). You do not generate a migration for those tables on first deploy.
 
 The first hosted deploy of a **new** Brain instance prints a **new** execution API key in the **Build Logs** during `brain:deploy`. Expand **Build Logs** (warning badge if present). Search for `brain:deploy`. Real lines:
 
@@ -249,7 +249,7 @@ If Chat says Brain is not configured, `BRAIN_URL` or `BRAIN_API_KEY` is missing 
 | Empty **Brains** after Vercel deploy | Check the Vercel build log for `brain:deploy`; confirm `TELOS_BRAIN_ORG_API_KEY` |
 | Skip Brain deploy while debugging | Set `BRAIN_DEPLOY=0` (app + Drizzle still deploy) |
 | Auth failures on hosted Chat | You reused local Docker `BRAIN_API_KEY` — use the key from the hosted build log |
-| Chat 502 / `relation "chat_sessions" does not exist` | Vercel `db:migrate` only applies files in `supabase/migrations/`. The checked-in `0000_*.sql` predates Chat (and transactions/budgets). Generate a follow-up Drizzle migration from current `db/schema.ts` and redeploy — do not copy someone else’s GitHub. |
+| Chat 502 / `relation "chat_sessions" does not exist` | Current template `main` already ships `0001_*.sql` for chat, finance, and insights. If you still see this, the GitHub repo Vercel is building is older than that — merge https://github.com/telos-brain/vercel-template-tally.git `main` and redeploy. Do not run `db:push` on Vercel. |
 | Go empty-state `brain init` | Do not run it in this repo; `brain/` already exists |
 
 Laptop deploy with the same env vars: `npm run brain:deploy`.
