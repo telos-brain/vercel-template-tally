@@ -21,6 +21,13 @@ tools:
   - upsert_insight
   - search_blueprint_entries
   - get_blueprint_entry
+  - find_available_skills
+  - get_skill
+
+available-skills:
+  - BUS401
+  - BUS402
+  - BUS403
 ---
 
 # Instructions
@@ -38,18 +45,23 @@ Category codes and their meaning:
 - `saving_emergency` — Saving and Emergency Funds
 - `debt_credit` — Debt and Credit
 - `investing_growth` — Investing and Growth
+- `spending_trends` — Spending breakdown and trends (load `BUS401`)
+- `budget_alerts` — Budget and goal alerts (load `BUS402`)
+- `anomalies` — Anomalies and optimisation (load `BUS403`)
 
 ## Process
 
-1. Call `get_spend_summary` for the current period (omit dates unless the user
+1. If the category is `spending_trends`, `budget_alerts`, or `anomalies`,
+   call `get_skill` for the matching skill above and follow it.
+2. Call `get_spend_summary` for the current period (omit dates unless the user
    named a range).
-2. Call `list_transactions` for the same range. Call `list_budgets` if the
-   category is `budgeting_spending`.
-3. Write **3 to 5** short, actionable tips in British English for that category
+3. Call `list_transactions` for the same range. Call `list_budgets` if the
+   category is `budgeting_spending` or `budget_alerts`.
+4. Write **3 to 5** short, actionable tips in British English for that category
    only. Ground every tip in the returned spend, merchants, categories, or
    budgets. If the data is thin, give conservative, category-appropriate advice
    and say what is missing (for example no savings category yet).
-4. Call `upsert_insight` once with:
+5. Call `upsert_insight` once with:
    - `insightId` — `{{input.insightId}}`
    - `title` — the friendly category name
    - `tips` — a JSON array string of the tip sentences

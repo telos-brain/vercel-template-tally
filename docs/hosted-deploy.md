@@ -224,6 +224,8 @@ Leave **`BRAIN_API_KEY` empty** on the first deploy (or set `BRAIN_DEPLOY=0` if 
 
 Optional: `BRAIN_INSTANCE` defaults to `{VERCEL_PROJECT_NAME}-prod` or `{VERCEL_PROJECT_NAME}-preview`. Do not reuse `local-brain`.
 
+**Required on Preview and Production:** `CRON_SECRET` authorises the daily insight heartbeat (`GET /api/cron/daily-insights`, 07:00 UTC in `vercel.json`). Vercel cron sends `Authorization: Bearer <CRON_SECRET>`. Without it the hosted job 401s and never starts Brain runs. Vercel Hobby does not execute crons — use local curl or Brain UI Run. Locally you can call the same path with `Authorization: Bearer $BRAIN_API_KEY`.
+
 ## 6. First deploy — copy the execution key
 
 On Vercel, `npm run build` runs `db:migrate`, then `brain:deploy` (to go.telosbrain.com), then `next build`. `db:migrate` applies every file in `supabase/migrations/`, including `0001_*.sql` (chat, transactions, budgets, insights). You do not generate a migration for those tables on first deploy.

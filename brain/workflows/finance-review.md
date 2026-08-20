@@ -32,6 +32,9 @@ available-tools:
 
 available-skills:
   - BUS301
+  - BUS401
+  - BUS402
+  - BUS403
   - BRA101
 ---
 
@@ -50,13 +53,16 @@ a required category is genuinely missing.
 3. Call `list_transactions` for the same range and identify uncategorised
    rows. Recategorise obvious ones with `update_transaction`.
 4. Compare spend to each budget. Call out anything at or above 80% used.
-5. Produce a structured summary:
+5. Load `BUS401`, `BUS402`, and `BUS403` with `get_skill` when the numbers
+   support spending-mix, budget-pacing, or anomaly findings. Use those skills
+   to phrase the insights — do not invent patterns they would skip.
+6. Produce a structured summary:
    - Period reviewed
    - Spend by category
    - Budget progress
    - Uncategorised or uncertain items
    - Insights worth remembering
-6. If you find a reusable pattern, call `add_blueprint_entry` under
+7. If you find a reusable pattern, call `add_blueprint_entry` under
    **Insights**.
 
 ## Rules

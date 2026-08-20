@@ -9,12 +9,16 @@ import { db } from "@db/index";
 import { BudgetPeriod, profiles, memberships } from "@db/schema";
 import { eq } from "drizzle-orm";
 import { isBudgetPeriod } from "@/lib/finance";
+import { isInsightCategory } from "@/lib/insights";
 import {
   getBudgetProgress,
   listBudgets as listBudgetsForOrganisation,
   upsertBudget as upsertBudgetForOrganisation,
 } from "@/server/finance/budgets";
-import { completeInsight as completeInsightForOrganisation } from "@/server/finance/insights";
+import {
+  completeInsight as completeInsightForOrganisation,
+  createReadyInsight,
+} from "@/server/finance/insights";
 import {
   createTransactions,
   listTransactions as listTransactionsForOrganisation,
@@ -383,6 +387,39 @@ export async function upsertInsight(
   };
 }
 
+export async function createInsight(
+  parameters: Record<string, unknown>,
+  context: ToolExecutionContext
+) {
+  const category = asString(parameters.category);
+  const title = asString(parameters.title);
+  if (!category || !title) {
+    throw new Error("category and title are required.");
+  }
+  if (!isInsightCategory(category)) {
+    throw new Error(
+      "category must be one of spending_trends, budget_alerts, anomalies, budgeting_spending, saving_emergency, debt_credit, or investing_growth."
+    );
+  }
+
+  const tips = parseTipList(parameters.tips);
+  const { insight, alreadyRecorded } = await createReadyInsight(
+    context.organisationId,
+    { category, title, tips }
+  );
+
+  const label = `${insight.title} (${insight.status})`;
+  return {
+    category: insight.category,
+    status: insight.status,
+    title: insight.title,
+    alreadyRecorded,
+    message: alreadyRecorded
+      ? `Insight already recorded today: ${label}.`
+      : `Insight created: ${label}.`,
+  };
+}
+
 /** Registry of tools exposed at `/api/tools/{toolId}`. */
 export const hostTools: Record<string, HostToolHandler> = {
   getUsers: getUsersForOrganisation,
@@ -393,4 +430,5 @@ export const hostTools: Record<string, HostToolHandler> = {
   upsertBudget,
   getSpendSummary,
   upsertInsight,
+  createInsight,
 };

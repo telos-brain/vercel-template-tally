@@ -7,6 +7,8 @@ interface ButtonProps {
   loading?: boolean;
   onClick?: () => void;
   className?: string;
+  title?: string;
+  "aria-label"?: string;
 }
 
 export default function Button({
@@ -18,6 +20,8 @@ export default function Button({
   loading = false,
   onClick,
   className = "",
+  title,
+  "aria-label": ariaLabel,
 }: ButtonProps) {
   const baseClasses =
     "font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2";
@@ -57,6 +61,8 @@ export default function Button({
       className={buttonClasses}
       onClick={isDisabled ? undefined : onClick}
       disabled={isDisabled}
+      title={title}
+      aria-label={ariaLabel}
     >
       {loading && (
         <svg

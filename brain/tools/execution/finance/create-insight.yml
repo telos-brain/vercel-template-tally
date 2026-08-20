@@ -1,0 +1,44 @@
+name: create_insight
+version: 1
+description: >-
+  Creates a ready host-app insight card from transaction analysis. Use on the
+  daily heartbeat when a skill has a concrete finding. Does not update a queued
+  row — call upsert_insight for that.
+api:
+  method: POST
+  path: /api/tools/createInsight
+  connector: my-app
+parameters:
+  - name: authorization
+    description: Host tool API key, injected as the Authorization bearer token.
+    header: Authorization
+    secret: MY_APP_API_KEY
+    value: "Bearer {secret}"
+  - name: brainAuthorization
+    description: Brain handshake key, injected as X-Brain-Authorization.
+    header: X-Brain-Authorization
+    secret: BRAIN_API_KEY
+    value: "Bearer {secret}"
+  - name: organisationId
+    description: Organisation scope, injected from the current entity.
+    entity: organisationId
+  - name: category
+    description: >-
+      Insight category code. One of spending_trends, budget_alerts, anomalies,
+      budgeting_spending, saving_emergency, debt_credit, investing_growth.
+    type: string
+    required: true
+  - name: title
+    description: Short card title for this insight.
+    type: string
+    required: true
+  - name: tips
+    description: >-
+      JSON array of 3 to 5 short actionable tip sentences as a string, e.g.
+      ["Dining is 28% of spend this month.","Countdown repeats weekly at about $90."].
+    type: string
+    required: true
+response-markdown: |
+  {{result.message}}
+error-markdown: |
+  Could not create insight: {{result.result}}

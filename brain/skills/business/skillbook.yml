@@ -1,7 +1,7 @@
 name: Business
 code: BUS
 prefix: BUS
-version: 2
+version: 3
 description: >-
   Starter skillbook for small-business operations — sales, customer management,
   operations, finance, and general skills.
@@ -23,6 +23,9 @@ categories:
     index: 400
     skills:
       - ./BUS301-importing-bank-transactions.md
+      - ./BUS401-spending-breakdown-and-trends.md
+      - ./BUS402-budget-and-goal-alerts.md
+      - ./BUS403-anomalies-and-optimisation.md
   - name: General
     description: General skills that span multiple areas
     index: 500

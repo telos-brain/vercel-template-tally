@@ -5,6 +5,9 @@ export const INSIGHT_CATEGORIES = [
   "saving_emergency",
   "debt_credit",
   "investing_growth",
+  "spending_trends",
+  "budget_alerts",
+  "anomalies",
 ] as const;
 
 export const INSIGHT_CATEGORY_LABELS: Record<InsightCategory, string> = {
@@ -12,6 +15,9 @@ export const INSIGHT_CATEGORY_LABELS: Record<InsightCategory, string> = {
   saving_emergency: "Saving and Emergency Funds",
   debt_credit: "Debt and Credit",
   investing_growth: "Investing and Growth",
+  spending_trends: "Spending breakdown and trends",
+  budget_alerts: "Budget and goal alerts",
+  anomalies: "Anomalies and optimisation",
 };
 
 export function isInsightCategory(value: string): value is InsightCategory {
