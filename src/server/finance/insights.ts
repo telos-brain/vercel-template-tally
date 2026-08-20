@@ -1,11 +1,12 @@
-import { withOrgContext } from "@db/index";
+import { db, withOrgContext } from "@db/index";
 import {
   insights,
+  organisations,
   transactions,
   type Insight,
   type InsightCategory,
 } from "@db/schema";
-import { and, count, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, gte, isNotNull } from "drizzle-orm";
 import { INSIGHT_CATEGORY_LABELS } from "@/lib/insights";
 import {
   createBrainUnitOfWork,
@@ -15,6 +16,7 @@ import {
 import { ensureBrainEntityForOrganisation } from "@/server/brain/entities";
 
 const INSIGHT_WORKFLOW_CODE = "WF-FINANCE-INSIGHT";
+const DAILY_INSIGHT_WORKFLOW_CODE = "WF-FINANCE-DAILY";
 const INSIGHT_UNIT_OF_WORK_TYPE = "insight";
 
 export async function listInsights(organisationId: string): Promise<Insight[]> {
@@ -156,6 +158,156 @@ export async function queueInsights(
   }
 
   return created;
+}
+
+function startOfUtcDay(now = new Date()): Date {
+  return new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  );
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current && typeof current === "object"; depth += 1) {
+    if ("code" in current && (current as { code: unknown }).code === "23505") {
+      return true;
+    }
+    current = "cause" in current ? (current as { cause: unknown }).cause : undefined;
+  }
+  return false;
+}
+
+export async function createReadyInsight(
+  organisationId: string,
+  input: { category: InsightCategory; title: string; tips: string[] }
+): Promise<{ insight: Insight; alreadyRecorded: boolean }> {
+  const hasTransactions = await organisationHasTransactions(organisationId);
+  if (!hasTransactions) {
+    throw new Error("Add transactions before creating an insight.");
+  }
+
+  const title = input.title.trim();
+  const tips = input.tips.map(tip => tip.trim()).filter(tip => tip.length > 0);
+
+  if (!title) {
+    throw new Error("title is required.");
+  }
+  if (tips.length === 0) {
+    throw new Error("tips must include at least one sentence.");
+  }
+
+  return withOrgContext(organisationId, async tx => {
+    const [existing] = await tx
+      .select()
+      .from(insights)
+      .where(
+        and(
+          eq(insights.organisationId, organisationId),
+          eq(insights.category, input.category),
+          eq(insights.status, "ready"),
+          gte(insights.createdAt, startOfUtcDay())
+        )
+      )
+      .limit(1);
+
+    if (existing) {
+      return { insight: existing, alreadyRecorded: true };
+    }
+
+    try {
+      const [inserted] = await tx
+        .insert(insights)
+        .values({
+          organisationId,
+          category: input.category,
+          status: "ready",
+          title,
+          tips,
+        })
+        .returning();
+
+      if (!inserted) {
+        throw new Error("Insight was not saved.");
+      }
+
+      return { insight: inserted, alreadyRecorded: false };
+    } catch (error) {
+      if (!isUniqueViolation(error)) {
+        throw error;
+      }
+
+      const [duplicate] = await tx
+        .select()
+        .from(insights)
+        .where(
+          and(
+            eq(insights.organisationId, organisationId),
+            eq(insights.category, input.category),
+            eq(insights.status, "ready"),
+            gte(insights.createdAt, startOfUtcDay())
+          )
+        )
+        .limit(1);
+
+      if (!duplicate) {
+        throw error;
+      }
+
+      return { insight: duplicate, alreadyRecorded: true };
+    }
+  });
+}
+
+export async function startDailyInsightRuns(): Promise<{
+  started: number;
+  skipped: number;
+  failed: number;
+}> {
+  if (!isBrainConfigured()) {
+    throw new Error("Brain is not configured. Set BRAIN_URL and BRAIN_API_KEY.");
+  }
+
+  const orgs = await db
+    .select({
+      id: organisations.id,
+      brainEntityId: organisations.brainEntityId,
+    })
+    .from(organisations)
+    .where(isNotNull(organisations.brainEntityId));
+
+  let started = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const org of orgs) {
+    if (!org.brainEntityId) {
+      skipped += 1;
+      continue;
+    }
+
+    const hasTransactions = await organisationHasTransactions(org.id);
+    if (!hasTransactions) {
+      skipped += 1;
+      continue;
+    }
+
+    try {
+      await runWorkflowAsync(DAILY_INSIGHT_WORKFLOW_CODE, {
+        entityId: org.brainEntityId,
+        inputMessage:
+          "Create today's personal-finance insight cards from the organisation's transactions.",
+      });
+      started += 1;
+    } catch (error) {
+      failed += 1;
+      console.error(
+        `Failed to start daily insights for organisation ${org.id}:`,
+        error
+      );
+    }
+  }
+
+  return { started, skipped, failed };
 }
 
 export async function completeInsight(

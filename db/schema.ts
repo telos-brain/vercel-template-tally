@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   date,
   index,
@@ -8,6 +9,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -40,6 +42,9 @@ const insightCategoryEnum = pgEnum("insight_categories", [
   "saving_emergency",
   "debt_credit",
   "investing_growth",
+  "spending_trends",
+  "budget_alerts",
+  "anomalies",
 ]);
 
 const insightStatusEnum = pgEnum("insight_statuses", [
@@ -96,6 +101,9 @@ export const InsightCategory = {
   SavingEmergency: "saving_emergency" as const,
   DebtCredit: "debt_credit" as const,
   InvestingGrowth: "investing_growth" as const,
+  SpendingTrends: "spending_trends" as const,
+  BudgetAlerts: "budget_alerts" as const,
+  Anomalies: "anomalies" as const,
 } as const;
 
 export const InsightStatus = {
@@ -253,7 +261,16 @@ export const insights = pgTable(
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
-  table => [index("idx_insights_org_status").on(table.organisationId, table.status)]
+  table => [
+    index("idx_insights_org_status").on(table.organisationId, table.status),
+    uniqueIndex("idx_insights_org_category_ready_day")
+      .on(
+        table.organisationId,
+        table.category,
+        sql`((${table.createdAt} AT TIME ZONE 'UTC')::date)`
+      )
+      .where(sql`${table.status} = 'ready'`),
+  ]
 );
 
 export const chatMessages = pgTable("chat_messages", {

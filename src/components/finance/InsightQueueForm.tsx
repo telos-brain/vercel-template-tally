@@ -33,6 +33,9 @@ export default function InsightQueueForm({
       savingEmergency: false,
       debtCredit: false,
       investingGrowth: false,
+      spendingTrends: false,
+      budgetAlerts: false,
+      anomalies: false,
     },
   });
 
@@ -42,6 +45,9 @@ export default function InsightQueueForm({
     if (data.savingEmergency) categories.push("saving_emergency");
     if (data.debtCredit) categories.push("debt_credit");
     if (data.investingGrowth) categories.push("investing_growth");
+    if (data.spendingTrends) categories.push("spending_trends");
+    if (data.budgetAlerts) categories.push("budget_alerts");
+    if (data.anomalies) categories.push("anomalies");
     onSubmit(categories);
   };
 
@@ -73,6 +79,27 @@ export default function InsightQueueForm({
         id="investingGrowth"
         label="Investing and Growth"
         name="investingGrowth"
+        control={control}
+        colSpan=""
+      />
+      <Checkbox
+        id="spendingTrends"
+        label="Spending breakdown and trends"
+        name="spendingTrends"
+        control={control}
+        colSpan=""
+      />
+      <Checkbox
+        id="budgetAlerts"
+        label="Budget and goal alerts"
+        name="budgetAlerts"
+        control={control}
+        colSpan=""
+      />
+      <Checkbox
+        id="anomalies"
+        label="Anomalies and optimisation"
+        name="anomalies"
         control={control}
         colSpan=""
       />

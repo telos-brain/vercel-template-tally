@@ -55,6 +55,18 @@ Use BRA211 when the host application already exists. Use BRA104 for a greenfield
 
 After the schema exists, upload documents, transcripts, or emails via the Brain admin UI or API inbox. `brain-compose.yml` defaults to `learning-mode: high`. Start at `high`, review daily checkpoints for the first 5 days, then set `low` when quality is acceptable.
 
+## Daily insight heartbeat
+
+`WF-FINANCE-DAILY` declares `frequency: daily` as the Brain heartbeat example. Brain 0.4.7 does not yet fan out scheduled runs per organisation entity, so finance tools would have no `organisationId` if the workflow ran with no entity.
+
+The host app starts one async run per organisation that already has a Brain entity and at least one transaction:
+
+- Vercel Pro/Enterprise cron: `GET /api/cron/daily-insights` at 07:00 UTC (`vercel.json`). Set `CRON_SECRET` on Preview and Production — the job sends that bearer token. Without it the route returns 401. Vercel Hobby does not run crons.
+- Local: `curl -H "Authorization: Bearer $BRAIN_API_KEY" http://localhost:3000/api/cron/daily-insights`
+- Brain UI: run `WF-FINANCE-DAILY` with the organisation entity selected
+
+The workflow writes one Insights card per skill (`BUS401`, `BUS402`, `BUS403`) that has a concrete finding, via `create_insight`. You can also queue those categories from **Add new insight**.
+
 ## Execute API smoke test
 
 Local:

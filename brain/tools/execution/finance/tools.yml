@@ -10,3 +10,4 @@ tools:
   - upsert-budget.yml
   - get-spend-summary.yml
   - upsert-insight.yml
+  - create-insight.yml

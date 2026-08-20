@@ -79,6 +79,7 @@ workflows:
   - workflows/chat-title.md
   - workflows/finance-review.md
   - workflows/finance-insight.md
+  - workflows/finance-daily.md
   - workflows/ask-question.md
   - workflows/create-frame-of-reference.md
   - workflows/review-unit-of-work.md

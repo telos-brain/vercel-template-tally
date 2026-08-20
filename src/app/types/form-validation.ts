@@ -52,12 +52,18 @@ export const InsightQueueSchema = object({
   savingEmergency: boolean().default(false),
   debtCredit: boolean().default(false),
   investingGrowth: boolean().default(false),
+  spendingTrends: boolean().default(false),
+  budgetAlerts: boolean().default(false),
+  anomalies: boolean().default(false),
 }).test("at-least-one-category", "Select at least one category", function (value) {
   const selected =
     value.budgetingSpending ||
     value.savingEmergency ||
     value.debtCredit ||
-    value.investingGrowth;
+    value.investingGrowth ||
+    value.spendingTrends ||
+    value.budgetAlerts ||
+    value.anomalies;
   return selected
     ? true
     : this.createError({

@@ -19,6 +19,13 @@ import {
   INSIGHT_CATEGORY_LABELS,
   summariseInsightTips,
 } from "@/lib/insights";
+import { formatRelativeTime } from "@/lib/chat";
+
+const DISMISS_HINT = "Dismissing deletes the insight.";
+
+function insightCreatedLabel(value: Date | string): string {
+  return formatRelativeTime(value);
+}
 
 function InsightCard({
   insight,
@@ -47,13 +54,17 @@ function InsightCard({
           {insight.status === "ready" && insight.title && (
             <p className="mt-1 text-sm text-gray-500">{insight.title}</p>
           )}
+          <p className="mt-1 text-xs text-gray-400">
+            {insightCreatedLabel(insight.createdAt)}
+          </p>
         </button>
         <button
           type="button"
           className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
           onClick={onDismiss}
           disabled={isDismissing}
-          title="Dismiss"
+          title={DISMISS_HINT}
+          aria-label={DISMISS_HINT}
         >
           <Icon icon="trash" className="h-3.5 w-3.5" />
         </button>
@@ -210,6 +221,9 @@ export default function InsightsPage() {
           onClose={() => setViewing(null)}
         >
           <div className="max-h-[70vh] overflow-y-auto pr-1">
+            <p className="mb-4 text-xs text-gray-400">
+              {insightCreatedLabel(viewingInsight.createdAt)}
+            </p>
             {viewingInsight.status === "ready" && viewingInsight.title && (
               <p className="mb-4 text-sm text-gray-600">{viewingInsight.title}</p>
             )}
@@ -233,6 +247,8 @@ export default function InsightsPage() {
             <Button
               type="button"
               variant="dangerSoft"
+              title={DISMISS_HINT}
+              aria-label={DISMISS_HINT}
               onClick={() => {
                 void handleDismiss(viewingInsight);
               }}
