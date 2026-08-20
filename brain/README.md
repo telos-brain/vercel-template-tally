@@ -76,7 +76,7 @@ Finance tools call the Next.js app at `POST /api/tools/{toolId}` using the `my-a
 - `MY_APP_API_KEY` — **must equal** the app’s `TOOL_API_KEY`
 - `BRAIN_API_KEY` — the same per-brain execution key the app stores as `BRAIN_API_KEY`
 
-Both `Authorization: Bearer <TOOL_API_KEY>` and `X-Brain-Authorization: Bearer <BRAIN_API_KEY>` are required. After changing finance tools or `WF-CHAT`, redeploy.
+Both `Authorization: Bearer <TOOL_API_KEY>` and `X-Brain-Authorization: Bearer <BRAIN_API_KEY>` are required. After changing finance tools or `WF-CHAT`, redeploy. If hosted Chat works but tools return `401 Protected deployment`, turn off Vercel Authentication — see [docs/hosted-deploy.md](../docs/hosted-deploy.md) **Deployment Protection**. These tools do not send `x-vercel-protection-bypass`.
 
 ## Repository hygiene
 
