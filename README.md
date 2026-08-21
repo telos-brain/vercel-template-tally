@@ -19,7 +19,7 @@ Demo app (Next.js, Clerk, Supabase) with a Telos Brain schema in `brain/` with t
 
 Local Brain is self-hosted Docker and does not use Clerk. The host app can run locally without Clerk: `next dev` with placeholder Clerk keys signs you in as `local@localhost` in a seeded **Local** organisation. Clerk is required on Vercel / production.
 
-After setup you can open **Chat** and paste a bank statement (`samples/bank-statement.txt`).
+After setup you can open **Chat** and paste a bank statement (`samples/transactions.csv`).
 
 ## 1. Clone and install
 
@@ -136,7 +136,7 @@ npm run dev
 Open [http://localhost:3000](http://localhost:3000). Without Clerk keys you land on **Dashboard** as `local@localhost`. With Clerk, sign in and create an organisation, then:
 
 1. Open **Chat** and send a message (workflow `WF-CHAT`). Chats persist in the sidebar; titles are generated automatically (`WF-CHAT-TITLE`). You can watch tools run while Brain works.
-2. Paste `samples/bank-statement.txt` into chat, or use **Transactions** / **Budgets**.
+2. Paste `samples/transactions.csv` into Chat to add transactions, or use **Transactions** / **Budgets**.
 
 You should now have three processes: Next.js `:3000`, Supabase (CLI ports), Brain `:60061`.
 
@@ -209,6 +209,7 @@ Do not commit `.env`, `brain/.env.local`, `brain/.env.stage`, `brain/.env.prod`,
 | Deploy fails on embeddings | Blank `VOYAGE_API_KEY` in the Vercel env (or brain env file) |
 | Vercel build fails at `brain:deploy` | Missing `TELOS_BRAIN_ORG_API_KEY` / `ANTHROPIC_API_KEY` / `VOYAGE_API_KEY` / `TOOL_API_KEY`. Set `BRAIN_DEPLOY=0` to ship the app first |
 | Tools never hit the Vercel app | Hostname missing from `allowed-callback-domains`, or `MY_APP_API_URL` / `BRAIN_API_KEY` still a placeholder after first hosted deploy. Hosted `MY_APP_API_URL` must be the public `https://` app URL, not `host.docker.internal` |
+| Port 54322 (or 54321) already allocated | Another local Supabase is using the default ports. In that other project run `supabase stop`, then `npm run prepare` here. Do not change this template’s `supabase/config.toml` ports for a first-time install |
 | Port 1433 already allocated | Change `sql_port` in `brain/brain.config.toml`, then `brain start` again |
 | Version conflict on redeploy | `brain snapshot --env local --instance local-brain` then deploy |
 

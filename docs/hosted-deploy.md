@@ -248,11 +248,11 @@ Redeploy so the app **and** the brain pick up `BRAIN_API_KEY` for tool callbacks
 
 ## 8. Smoke-test Chat
 
-Open the Vercel URL, sign in with Clerk, create/select an organisation if prompted, open **Chat**, send a message (workflow `WF-CHAT`). Titles generate via `WF-CHAT-TITLE`. You can paste `samples/bank-statement.txt`.
+Open the Vercel URL, sign in with Clerk, create/select an organisation if prompted, open **Chat**, send a message (workflow `WF-CHAT`). Titles generate via `WF-CHAT-TITLE`. You can paste `samples/transactions.csv`.
 
 If Chat says Brain is not configured, `BRAIN_URL` or `BRAIN_API_KEY` is missing for that environment.
 
-Chat is **app → Brain**. Tools such as `record_transactions` are **Brain → your Vercel URL**. After a first Chat message works, paste `samples/bank-statement.txt` to prove the webhook path. Two host-side blocks look similar (parsed rows, import never lands):
+Chat is **app → Brain**. Tools such as `record_transactions` are **Brain → your Vercel URL**. After a first Chat message works, paste `samples/transactions.csv` to prove the webhook path. Two host-side blocks look similar (parsed rows, import never lands):
 
 1. **Vercel Authentication** — `401 Protected deployment`. See **Deployment Protection** above. Your browser has a Vercel SSO cookie; the Brain does not.
 2. **Callback allowlist** — `The tool 'record_transactions' webhook URL was blocked for safety: URL host is not in the allowed callback domains.` Set `MY_APP_API_URL` to the public production URL, then redeploy so `brain:deploy` merges that hostname into `allowed-callback-domains` (exact hosts only; no wildcards). Optional extra host: `BRAIN_CALLBACK_DOMAIN`.
