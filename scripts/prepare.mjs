@@ -190,7 +190,17 @@ function printDone(brainApiKey) {
   printCommand("brain", ["deploy", "--env", "local", "--instance", "local-brain"], { cwd: brainDir });
   note("Then start the app:");
   printCommand("npm", ["run", "dev"]);
-  hint("open http://localhost:3000");
+  const brainUrl =
+    keepIfSet(readEnvValue(appEnvPath, "BRAIN_URL")) ?? "http://127.0.0.1:60061";
+  hint("App:   http://localhost:3000");
+  hint(`Brain: ${brainUrl}  (admin UI, no sign-in)`);
+
+  heading("Try it");
+  note("Open Chat and add transactions — paste samples/transactions.csv");
+
+  heading("Hosted (optional)");
+  note("To deploy on Vercel and Telos Hosted (https://go.telosbrain.com):");
+  hint("see docs/hosted-deploy.md");
 
   console.log("");
   ok("App .env TOOL_API_KEY and brain/.env.local MY_APP_API_KEY now match.");
