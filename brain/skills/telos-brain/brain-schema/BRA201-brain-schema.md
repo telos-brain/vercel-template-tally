@@ -1,7 +1,7 @@
 ---
 name: Brain Schema
 code: BRA201
-version: 37
+version: 46
 description: How to setup a brain schema using yml and markdown
 ---
 
@@ -61,6 +61,8 @@ brain-schema/
   connectors/
     example-oauth2.yml           # one connector definition per file (BRA209)
     example-api-key.yml
+    example-none.yml
+    example-caller-jwt.yml
 
   tools/
     tickets/
@@ -136,6 +138,7 @@ name: kappa                      # REQUIRED: the brain's name
 # Optional brain-level settings (persisted on every `brain deploy`):
 # embedding-model: voyage-3-lite # optional; defaults to voyage-3-lite when omitted
 # learning-mode: off             # optional; off | low | medium | high (omit = off)
+# llm-model: local_1/qwen3:8b    # optional; default LLM (omit = workflow model)
 # checkpoint-strategy: Daily     # optional; see §4.2 (omit = Daily)
 # allowed-callback-domains:      # optional; shared outbound host allowlist (see §4.3)
 #   - harness.example.com
@@ -185,6 +188,17 @@ Rules:
 - `embedding-model` is optional (defaults to `voyage-3-lite` when omitted).
 - `learning-mode` is optional (`off` | `low` | `medium` | `high`; omit or null is
   treated as `off`). Persisted onto the Brain on every deploy.
+- `llm-model` is optional (a `provider/model` string such as
+  `local_1/qwen3:8b` or `anthropic/claude-sonnet-4-6`). When set and the matching
+  credential exists, every live run uses this model instead of the workflow
+  frontmatter. Omit or blank → each workflow uses its own `model:`. If that is
+  also omitted, the run fails (no silent Anthropic/OpenAI default). A missing
+  credential for this value falls back to the workflow model. The same default
+  can be set with `DEFAULT_LLM_MODEL` in `.env` (compose `llm-model` wins when
+  both are present). Simulation `modelOverride` (this run only) still wins;
+  older clients may send `settingsOverride.model` instead.
+  Deploy warns (does not fail) when executable workflows have no `model:` and
+  no default is set. See **BRA210**.
 - `checkpoint-strategy` is optional (see §4.2).
 - `allowed-callback-domains` is optional (see §4.3) — shared host allowlist for
   async run callbacks and declared-tool webhook URLs.
@@ -279,7 +293,7 @@ checkpoint-strategy:
 | ----- | ---- | ---------------------------- |
 | `BeforeDeploy` | Event | Immediately **before** schema resource phases on `brain deploy` (server-side). Copy-on-write then captures the pre-deploy schema as resources mutate. |
 | `AfterDeploy` | Event | Immediately **after** all schema resource phases on `brain deploy` (server-side). Marks the post-deploy schema as the restore baseline. |
-| `Daily` | Schedule | Once per day (Hangfire / `NextCheckpointUtc`). Equivalent aliases: `@daily`. |
+| `Daily` | Schedule | Once per day. Equivalent aliases: `@daily`. |
 | `Weekly` | Schedule | Once per week. Equivalent aliases: `@weekly`, `0 0 * * 0`. |
 | *(cron)* | Schedule | Any other free-form cron expression (e.g. `0 30 9 * * 1-5`). |
 
@@ -294,12 +308,10 @@ Rules:
 - Event strategies (`BeforeDeploy` / `AfterDeploy`) are handled **server-side**
   during deploy — the CLI does not create checkpoints. Both may be set together;
   each fires at its phase.
-- Schedule strategies (`Daily` / `Weekly` / cron) are armed on deploy via
-  `NextCheckpointUtc` (soonest next fire across **all** schedule entries). A
-  Hangfire job sweeps due brains. Multiple schedules are a union, not
-  first-wins.
-- Event-only strategies clear `NextCheckpointUtc` so Hangfire does not invent a
-  schedule that was not configured.
+- Schedule strategies (`Daily` / `Weekly` / cron) are armed on deploy. The
+  soonest next fire across **all** schedule entries is used. Multiple
+  schedules are a union, not first-wins.
+- Event-only strategies do not create a recurring schedule.
 - Do not set `max-checkpoints` in `brain-compose.yml` — it is ignored on deploy.
 
 ### 4.3 Allowed callback / webhook domains (SSRF allowlist)
@@ -393,7 +405,7 @@ The `api.path` host must satisfy the shared outbound allowlist in §4.3
 (`allowed-callback-domains`) when that list is configured. `https` is required
 outside Development; private and metadata IP ranges are always blocked.
 
-**MCP tool** (invoked via an MCP server tool — BRA200):
+**MCP tool** (invoked via an MCP server tool):
 
 ```yaml
 mcp:
@@ -404,9 +416,8 @@ mcp:
   server: my-mcp-server                # optional — legacy server label (still accepted)
 ```
 
-A tool may use a connector, a direct `server-url` / `server`, or both. Runtime
-MCP protocol dispatch is BRA201; connector auth/URL resolution for API tools is
-BRA199.
+A tool may use a connector, a direct `server-url` / `server`, or both. Connector
+auth and URL resolution are in **BRA209**.
 
 **System tool** (executed by an in-brain system tool, not an external call):
 
@@ -467,7 +478,7 @@ native:
   type: web_search                     # REQUIRED — capability key (web_search | web_fetch)
 ```
 
-A native tool is enabled directly on the model and executed by the provider. Unlike every other type it is **not** routed through the tool router, makes no outbound call, and takes **no `parameters`**. Add it to a workflow's `tools` list by `name`; at run time it is passed to the model as a built-in capability. Supported keys: `web_search`, `web_fetch`.
+A native tool is enabled directly on the model and executed by the provider. Unlike every other type it makes no outbound call and takes **no `parameters`**. Add it to a workflow's `tools` list by `name`; at run time it is passed to the model as a built-in capability. Supported keys: `web_search`, `web_fetch`.
 
 ### 5.4 Worked example: `web_search` and `web_fetch`
 
@@ -555,8 +566,8 @@ parameters:
 ```
 
 Key behaviour: a parameter is **exposed to the LLM only when it has no `value`,
-`secret`, `entity` or `header`**. Set `value` to pin a param and hide it. `name`
-and `description` are required on every parameter.
+`secret`, `entity`, `unitofwork`, `input` or `header`**. Set `value` to pin a
+param and hide it. `name` and `description` are required on every parameter.
 
 #### Parameter `type` (outbound coercion)
 
@@ -680,6 +691,31 @@ parameters:
 - A single tool may mix `entity:`- and `unitofwork:`-bound parameters; each
   resolves against its own scope.
 
+#### Binding a parameter to a workflow input variable
+
+A parameter can pull its value from the **current run's input bag** — the same
+keys as `{{input.*}}` (Execution API `variables` plus workflow-tool /
+`run_workflow` parameters). Declare an `input:` field naming that key:
+
+```yaml
+parameters:
+  - name: userId
+    description: Acting user id injected from this workflow run.
+    param: userId
+    input: userId
+```
+
+- `input:` names a key in the merged input bag (case-insensitive). At dispatch
+  the router injects that value under `param`.
+- Like `entity` and `unitofwork`, an `input`-bound parameter is **hidden from
+  the LLM**.
+- **If the run has no value for the key** (or the value is blank), the call
+  **fails** with a clear error — it is not sent empty. Pass the key as an
+  Execution API `variables` entry or as a workflow-tool / `run_workflow`
+  parameter.
+- Resolution order when several bindings are set on one parameter: `secret` →
+  `entity` → `unitofwork` → `input` → hardcoded `value` → model argument.
+
 #### End-to-end example: an authenticated API tool that uses a variable
 
 Putting §5.1–§5.3 together — a complete, authenticated API tool from scratch.
@@ -768,7 +804,8 @@ file lists the paths to deploy. Full authoring guide and worked examples:
 name: my-connector                 # REQUIRED — unique per brain
 url: https://api.example.com       # XOR with url-env — static HTTPS base URL
 # url-env: ACME_API_URL            # XOR with url — brain env var for the base URL
-auth-type: oauth2                  # REQUIRED — oauth2 | api-key | none
+auth-type: oauth2                  # REQUIRED — oauth2 | api-key | none | caller-jwt
+# type: elevenlabs                 # optional — platform identity (e.g. elevenlabs)
 scope: brain                       # optional — defaults to brain (only value today)
 parameters:                         # optional — omit the key entirely when empty
   - name: client-id
@@ -784,11 +821,20 @@ Rules:
 - Exactly one of `url` (static HTTPS) or `url-env` (brain environment variable
   name whose value is the base URL — **BRA202** / **BRA209**). HTTP is allowed
   only for `localhost`, `127.0.0.1`, and `host.docker.internal` (**BRA106**).
-- `parameters` declare credential **names** only. Secret **values** belong in
-  brain environment variables (`.env` / BRA202) — never in the YAML.
-- OAuth access/refresh tokens are runtime state (`ConnectorTokens`), not schema.
+- `parameters` declare credential **names** (and optional `secret:` env-var
+  bindings for api-key auth). Secret **values** belong in brain environment
+  variables (`.env` / BRA202) — never in the YAML.
+- OAuth access/refresh tokens are runtime state (the OAuth flow), not schema.
+- Optional `type` is a free-text platform identity (first convention value:
+  `elevenlabs`). Omit when unused. Distinct from `auth-type`. Used by the
+  ElevenLabs deployment handler to find the brain's ElevenLabs connector
+  (**BRA209**).
+- Optional `secret:` on an **api-key** parameter names the brain environment
+  variable that holds the API key (same field as tool parameters). When omitted,
+  api-key auth reads `CONNECTOR_{connectorId}_CLIENT_SECRET`. OAuth Connect does
+  not use `secret:` yet.
 - Upsert-always on deploy (no `version` field): Name / Url / UrlEnv / AuthType /
-  Scope / parameters are replaced on every deploy.
+  Type / Scope / ApiKeyHeader / parameters are replaced on every deploy.
 - Register paths under `connectors:` in `brain-compose.yml` (unlisted = not
   deployed).
 
@@ -868,17 +914,16 @@ envelope. Promotion only happens when all of the following are true:
    `tools:` — see §8).
 3. During a run, the agent calls `get_skill` for that skill.
 
-Matching names are then **promoted** for the remainder of that `WorkflowRun`
-only (appended to `WorkflowRuns.PromotedTools`). They appear in the Claude tool
-declarations on subsequent turns of the same run. They are never written back to
-`WorkflowTools`, and they do not affect other runs.
+Matching names are then **promoted** for the remainder of that run only. They
+appear in the model's tool list on subsequent turns of the same run. They are
+never written back to the workflow definition, and they do not affect other runs.
 
 | Outcome | Behaviour |
 | ------- | --------- |
 | Tool in skill `tools:` **and** workflow `available-tools:` | Promoted for this run |
 | Tool in skill `tools:` but **not** in the workflow available pool | Silently skipped (workflow curation wins) |
 | Tool already in workflow `tools:` (injected) | Already declared; promotion is a no-op / deduped |
-| System tools | Always available when declared on the workflow; they are not stored in `WorkflowTools` and are not part of promotion |
+| System tools | Always available when declared on the workflow; they are not part of promotion |
 
 Discovering available tools at runtime uses `find_available_tools` (semantic
 search over the workflow's `available-tools` pool). See the live example in
@@ -968,14 +1013,18 @@ code: WF-REVIEW                        # REQUIRED (unique workflow code)
 description: Reviews a blueprint submission and posts findings to the ticket.  # optional
 version: 1.1                           # optional (see §9)
 type: RUNNABLE                         # optional; one of TOOL | RUNNABLE | TRIGGERED | SYSTEM | SIMULATION | COMPACTION (default RUNNABLE)
-# trigger: inbox:SKILL_UPDATE           # optional; TRIGGERED only — scalar or YAML list (BRA121)
-# trigger: inbox:SKILL_UPDATE:low      # optional learning-mode qualifier (BRA122): low|medium|high
+# trigger: inbox:SKILL_UPDATE           # optional; TRIGGERED only — scalar or YAML list
+# trigger: inbox:SKILL_UPDATE:low      # optional learning-mode qualifier: low|medium|high
 # trigger:
 #   - inbox:SKILL_UPDATE
 #   - inbox:WORKFLOW_UPDATE:medium
 # model: anthropic/claude-sonnet-4-6   # optional; provider/model (see BRA210)
 # model: openai/gpt-4o                 # OpenAI
 # model: xai/grok-4.5                  # xAI / Grok
+# model: openrouter/anthropic/claude-sonnet-4.6  # OpenRouter catalogue id (BRA210)
+# model: local_1/qwen3:8b              # local Ollama / llama.cpp (BRA210)
+# deployment-type: elevenlabs_conversational_ai  # optional; project this workflow as an external agent
+# elevenlabs-agent-id: agt_xxx         # optional; written back after first ElevenLabs create — omit on first deploy
 
 # Injected tools — included in the LLM tool declarations for every turn.
 # Referenced by tool NAME (the tool's `name`).
@@ -996,7 +1045,7 @@ available-tools:
   - create_skill
   - create_schema_file
 
-# Pre-called tools (BRA216) — executed automatically at run startup before the
+# Pre-called tools — executed automatically at run startup before the
 # AI's first turn. Parameter values support Template Service tags such as
 # {{input.*}} (from the Execution API `variables` map). Omit entirely when unused.
 # input-tools:
@@ -1027,13 +1076,13 @@ Rules:
 - `name` and `code` are required; the markdown **body must not be empty** (it's
   the instructions).
 - `type` (case-insensitive) must be one of `TOOL`, `RUNNABLE`, `TRIGGERED`, `SYSTEM`, `SIMULATION`, `COMPACTION`;
-  omitted defaults to `RUNNABLE`. `TOOL` = callable by another workflow (e.g. exposed via a `workflow` tool), `RUNNABLE` = executed manually, `TRIGGERED` = fired when `trigger` matches, `SYSTEM` = never invoked directly; referenced by other workflows via `system-prompt-code` to supply the system prompt. `SIMULATION` = tool-response synthesis for simulation interception; the ToolRouter resolves the active workflow of this type (not by code) when intercepting Api/Mcp tools on a simulation run. `COMPACTION` = client-side context summariser for auto-compaction (Chat Completions providers) and the `compact_context` system tool on every provider (BRA263); at most one active per brain.
+  omitted defaults to `RUNNABLE`. `TOOL` = callable by another workflow (e.g. exposed via a `workflow` tool), `RUNNABLE` = executed manually, `TRIGGERED` = fired when `trigger` matches, `SYSTEM` = never invoked directly; referenced by other workflows via `system-prompt-code` to supply the system prompt. `SIMULATION` = tool-response synthesis for simulation interception; the active workflow of this type (not a specific code) handles intercepted API/MCP tools on a simulation run. `COMPACTION` = context summariser for auto-compaction and the `compact_context` system tool; at most one active per brain.
 - Well-known `trigger` values include `inbox:<RoutingType>` / `inbox:*` (inbox
   learning loop), `unitofwork:complete` (unit-of-work learning eval), and
-  `workflowrun:complete` (workflow-run learning eval, BRA091).
+  `workflowrun:complete` (workflow-run learning eval, **BRA207**).
 - **Inbox triggers** (two stages — full rules in **BRA404**):
   - **Entry create:** `inbox:<RoutingType>` or `inbox:*` (optional
-    `:low|medium|high` learning-mode qualifier, BRA122) selects which
+    `:low|medium|high` learning-mode qualifier) selects which
     `TRIGGERED` workflows get a `PENDING` inbox task when an entry is created.
     Qualifiers use `off < low < medium < high` (brain mode must meet or exceed
     the qualifier; unqualified inbox triggers always fire).
@@ -1053,13 +1102,13 @@ Rules:
   referenced names/codes exist.
 - A workflow with only `tools` and no `available-tools` is unchanged — every
   listed tool is treated as injected.
-- Deploy writes `tools` → `WorkflowTools.AvailabilityType = injected` and
-  `available-tools` → `available`. Extract splits the join rows back into the
-  two lists.
-- `input-tools` (optional, BRA216) declares tools to call automatically at run
+- On deploy, `tools` become the workflow's injected tools and `available-tools`
+  become the searchable pool. Extracting the schema writes those two lists back
+  out.
+- `input-tools` (optional) declares tools to call automatically at run
   startup. See **§8.0a**.
 
-### 8.0a Pre-called tools (`input-tools`, BRA216)
+### 8.0a Pre-called tools (`input-tools`)
 
 Use `input-tools` when a workflow needs structured context fetched before the
 model's first turn — for example loading a record by a reference passed in the
@@ -1081,15 +1130,14 @@ input-tools:
 | Field | Required | Meaning |
 | ----- | -------- | ------- |
 | `variable` | yes | Name under which the result is injected |
-| `tool` | yes | Tool Router name (`Tools.Name` or system tool name) |
+| `tool` | yes | Tool name (declared tool or system tool) |
 | `parameters` | no | String map of argument values; supports `{{…}}` tags |
 
 **Runtime behaviour**
 
-1. After BRA215 `variables` are available as `{{input.*}}`, each entry runs in
+1. After run `variables` are available as `{{input.*}}`, each entry runs in
    declaration order.
-2. Parameter values are rendered via the Template Service, then dispatched
-   through `IToolRouter.RouteAsync`.
+2. Parameter values are rendered as templates, then the named tool is called.
 3. Successful results are injected as a user-role context block:
 
    ```xml
@@ -1134,10 +1182,12 @@ before its first turn, with no extra LLM tool call required to fetch the widget.
 ### 8.0b Choosing a model (`model`, see **BRA210**)
 
 Set `model` to a `provider/model-name` string (e.g. `anthropic/claude-sonnet-4-6`,
-`openai/gpt-4o`, `xai/grok-4.5`). Supported providers, example model codes, and
+`openai/gpt-4o`, `xai/grok-4.5`, `openrouter/anthropic/claude-sonnet-4.6`,
+`local_1/qwen3:8b`). Supported providers, example model codes, and
 credential mapping are listed in **BRA210**. Bare model names (no prefix)
-default to Anthropic. Omit `model` for the platform default
-(`anthropic` / `claude-sonnet-4-5`).
+default to Anthropic. Omit `model` to use the brain default (`llm-model` /
+`DEFAULT_LLM_MODEL` / Settings). If that is also unset, the run fails — leftover
+cloud keys are not used as a silent default.
 
 ### 8.1 LLM execution settings (optional)
 
@@ -1147,13 +1197,13 @@ its default. Omitting all of them reproduces the historic behaviour exactly, so
 existing workflows need no changes.
 
 `max-turns` and `output-tokens` apply to every supported provider. `caching`
-applies on providers that support prompt caching (Anthropic, xAI); OpenAI
-ignores it. `thinking`, `thinking-budget`, and `thinking-effort` are
+applies on providers that support prompt caching (Anthropic, xAI); OpenAI and
+OpenRouter ignore it. `thinking`, `thinking-budget`, and `thinking-effort` are
 **Claude-oriented** — validated on deploy when present, but ignored at run time
-on OpenAI / xAI (see **BRA210** §5). `auto-compaction` applies on every
-provider: Claude uses server-side `compact_20260112`; OpenAI / xAI run the
-brain's `COMPACTION` workflow client-side when the prompt-token threshold is
-reached (BRA263).
+on OpenAI / xAI / OpenRouter (see **BRA210** §6). `auto-compaction` applies on
+every provider: Claude uses server-side `compact_20260112`; OpenAI / xAI /
+OpenRouter / local runners run the brain's `COMPACTION` workflow client-side
+when the prompt-token threshold is reached.
 
 ```markdown
 ---
@@ -1254,6 +1304,45 @@ Notes:
   `Completed`, at which point it becomes eligible for evaluation. An open session
   is not evaluated.
 
+### 8.3 External agent deployment (optional)
+
+A workflow may declare itself as a **deployable external agent**. These fields
+are **optional** and **kebab-case**. Omit both keys for a normal Brain-only
+workflow. Full connector authoring: **BRA209**.
+
+```markdown
+---
+name: Voice agent
+code: WF-VOICE
+type: RUNNABLE
+deployment-type: elevenlabs_conversational_ai
+# elevenlabs-agent-id: agt_xxx   # omit on first deploy; extract after create
+---
+```
+
+| Field | Default when omitted | Accepted values |
+| ----- | -------------------- | --------------- |
+| `deployment-type` | none (Brain-only) | free text; first convention value is `elevenlabs_conversational_ai` |
+| `elevenlabs-agent-id` | none | the `agent_id` returned by ElevenLabs after first create |
+
+Notes:
+
+- `deployment-type` is a discriminator, not a check-constrained enum. Presence
+  of `elevenlabs_conversational_ai` is what the ElevenLabs deployment handler
+  matches on.
+- The brain must have **one** connector with `type: elevenlabs` (BRA209). The
+  handler reads the `api-key` parameter's `secret:` when set, otherwise
+  `CONNECTOR_{connectorId}_CLIENT_SECRET`, as the `xi-api-key`.
+- On first deploy, omit `elevenlabs-agent-id`. The handler `POST`s
+  `/v1/convai/agents/create` and writes the returned id back on the workflow.
+  Run `brain extract` afterwards so the id is in the YAML; later deploys
+  `PATCH` the existing agent.
+- A later YAML deploy that omits `elevenlabs-agent-id` will clear the stored
+  id (absent optional fields persist as null).
+- Injected skill codes are resolved to full markdown at deploy time and
+  appended to `workflow.Instructions` — ElevenLabs has no Telos skill codes.
+- Omit both keys entirely when unused — never write `null` or empty string.
+
 ---
 
 ## 9. Versioning rules (important)
@@ -1289,7 +1378,7 @@ Required fields, by file type (everything else is optional):
 | ------------------------ | --------------------------------------------------------------------- |
 | `brain-compose.yml`      | `name`                                                                 |
 | — entity                 | `name`, `code`; each `variables` item needs `key`                      |
-| Connector YAML           | `name`, `url`, `auth-type` (`oauth2` \| `api-key` \| `none`); each parameter needs `name` + `description` |
+| Connector YAML           | `name`, `url` or `url-env`, `auth-type` (`oauth2` \| `api-key` \| `none` \| `caller-jwt`); optional `type` (e.g. `elevenlabs`); each parameter needs `name` + `description`; optional `secret` names the env var |
 | Tool group `tools.yml`   | `name`, `description`                                                  |
 | Tool definition          | `name`, `description`, exactly one of `api`/`mcp`/`system`/`workflow`/`native` |
 | — `api` block            | `path`                                                                 |
@@ -1302,7 +1391,7 @@ Required fields, by file type (everything else is optional):
 | Skill markdown           | frontmatter `name`, `code` + non-empty body; optional `tools` (tool names) |
 | `blueprint.yml`          | `name`; each category needs `name`; `scope` code if entity/unitofwork |
 | Blueprint entry markdown | frontmatter `name`, `category` + non-empty body                        |
-| Workflow markdown        | frontmatter `name`, `code` + non-empty body; optional `tools` / `available-tools` / `input-tools` |
+| Workflow markdown        | frontmatter `name`, `code` + non-empty body; optional `tools` / `available-tools` / `input-tools` / `deployment-type` / `elevenlabs-agent-id` |
 
 ---
 
