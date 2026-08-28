@@ -15,8 +15,8 @@ Precise enough for Cursor / Claude Code. Complete local steps in the root README
 # From repo root: npm install (or npm run prepare) starts Brain, writes
 # MY_APP_API_KEY plus BRAIN_API_KEY (from brain start) into .env.local and the app .env,
 # and runs npm run db:push. Then fill ANTHROPIC_API_KEY, VOYAGE_API_KEY, and remaining
-# MY_APP_* in .env.local. Optional: OPENROUTER_API_KEY, LOCAL_LLM_1_BASE_URL,
-# DEFAULT_LLM_MODEL (BRA210 / BRA106 §8).
+# MY_APP_* in .env.local. Optional: OPENROUTER_API_KEY, AZURE_OPENAI_*,
+# LOCAL_LLM_1_BASE_URL, DEFAULT_LLM_MODEL (BRA210 / BRA106 §8).
 brain deploy --env local --instance local-brain
 ```
 
@@ -32,7 +32,7 @@ Full local stack behaviour: skill **BRA106** (`skills/telos-brain/concepts/BRA10
 
 ## Preview and production (Telos Hosted)
 
-Vercel deploys this schema on every Preview and Production build (`npm run brain:deploy` from the repo root), next to Drizzle migrate. Set `TELOS_BRAIN_ORG_API_KEY`, `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`, and `TOOL_API_KEY` on each Vercel environment. Optional: `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `DEFAULT_LLM_MODEL`. Preview defaults to instance `{project}-preview` (`--env stage`); Production to `{project}-prod` (`--env prod`). Override with `BRAIN_INSTANCE`.
+Vercel deploys this schema on every Preview and Production build (`npm run brain:deploy` from the repo root), next to Drizzle migrate. Set `TELOS_BRAIN_ORG_API_KEY`, `ANTHROPIC_API_KEY`, and `TOOL_API_KEY` on each Vercel environment. `VOYAGE_API_KEY` is optional at deploy (embeddings skipped if unset). Optional: `OPENROUTER_API_KEY`, `AZURE_OPENAI_API_KEY` / `AZURE_OPENAI_ENDPOINT`, `OPENAI_API_KEY`, `XAI_API_KEY`, `DEFAULT_LLM_MODEL`. Preview defaults to instance `{project}-preview` (`--env stage`); Production to `{project}-prod` (`--env prod`). Override with `BRAIN_INSTANCE`.
 
 The script copies `.env.example` to `.env.stage` / `.env.prod` so declared keys exist; Vercel secrets override placeholders. It merges the current app hostname into `allowed-callback-domains` (exact hosts only — no wildcards). Add a stable custom domain to `brain-compose.yml` as well.
 

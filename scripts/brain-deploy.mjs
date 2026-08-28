@@ -147,6 +147,9 @@ function collectOptionalLlmEnv() {
       key === "OPENAI_API_KEY" ||
       key === "XAI_API_KEY" ||
       key === "OPENROUTER_API_KEY" ||
+      key === "AZURE_OPENAI_API_KEY" ||
+      key === "AZURE_OPENAI_ENDPOINT" ||
+      key === "AZURE_OPENAI_API_VERSION" ||
       key === "DEFAULT_LLM_MODEL" ||
       /^LOCAL_LLM_\d+_(BASE_URL|API_KEY)$/.test(key)
     ) {

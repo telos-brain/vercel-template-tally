@@ -9,7 +9,8 @@
  * keys, and runs `npm run db:push`. After this finishes, fill
  * ANTHROPIC_API_KEY, VOYAGE_API_KEY, and any remaining MY_APP_* values in
  * brain/.env.local, then `brain deploy --env local --instance local-brain`.
- * Optional: OPENROUTER_API_KEY, LOCAL_LLM_1_BASE_URL, DEFAULT_LLM_MODEL (BRA210).
+ * Optional: OPENROUTER_API_KEY, AZURE_OPENAI_*, LOCAL_LLM_1_BASE_URL,
+ * DEFAULT_LLM_MODEL (BRA210).
  * BRAIN_API_KEY is copied from `brain start` (status box and brain.lock
  * local.apiKey) into .env and brain/.env.local. If start cannot re-print the
  * key (instance already in the Docker volume) and neither env file has a real
@@ -131,6 +132,7 @@ async function main() {
     MY_APP_API_URL:
       keepIfSet(readEnvValue(brainEnvPath, "MY_APP_API_URL")) ??
       "http://host.docker.internal:3000",
+    ...collectOptionalLlmEnv(),
     ...(shouldWriteBrainApiKey(existingBrainEnvApiKey, announcedBrainApiKey)
       ? { BRAIN_API_KEY: brainApiKey }
       : {}),
@@ -169,8 +171,8 @@ function printPrerequisites() {
   hint("https://supabase.com/docs/guides/local-development/cli/getting-started");
   bullet("A Clerk account", "optional locally; required for stage/prod");
   bullet("An Anthropic API key", "workflows pin Anthropic unless DEFAULT_LLM_MODEL is set");
-  bullet("A Voyage API key", "embeddings; this brain defaults to voyage-3-lite");
-  hint("Optional: OpenRouter / OpenAI / xAI keys, or LOCAL_LLM_1_BASE_URL for Ollama (BRA106 §8).");
+  bullet("A Voyage API key", "optional at deploy; embeddings skipped if unset");
+  hint("Optional: OpenRouter / OpenAI / xAI / Azure keys, or LOCAL_LLM_1_BASE_URL for Ollama (BRA106 §8).");
   hint("Add Anthropic and Voyage keys in brain/.env.local before the 'brain deploy' step.");
   console.log("");
 }
@@ -184,7 +186,7 @@ function printDone(brainApiKey) {
   note("This script does not set these:");
   bullet(paint(`${s.bold}${s.brightMagenta}`, "ANTHROPIC_API_KEY"));
   bullet(paint(`${s.bold}${s.brightMagenta}`, "VOYAGE_API_KEY"));
-  bullet("optional OPENROUTER_API_KEY / DEFAULT_LLM_MODEL / LOCAL_LLM_1_BASE_URL");
+  bullet("optional OPENROUTER_API_KEY / AZURE_OPENAI_* / DEFAULT_LLM_MODEL / LOCAL_LLM_1_BASE_URL");
   bullet("any other MY_APP_* values you need");
   hint("MY_APP_API_KEY was generated; MY_APP_API_URL defaults to http://host.docker.internal:3000");
 
@@ -267,6 +269,35 @@ function ensureBrainEnvFile() {
   if (!existsSync(brainEnvPath)) {
     ensureCopied(brainEnvExamplePath, brainEnvPath);
   }
+}
+
+/**
+ * Optional LLM credentials from the current shell. Blank values are skipped
+ * so prepare does not wipe a line already in brain/.env.local.
+ *
+ * @returns {Record<string, string>}
+ */
+function collectOptionalLlmEnv() {
+  /** @type {Record<string, string>} */
+  const updates = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (
+      key === "OPENAI_API_KEY" ||
+      key === "XAI_API_KEY" ||
+      key === "OPENROUTER_API_KEY" ||
+      key === "AZURE_OPENAI_API_KEY" ||
+      key === "AZURE_OPENAI_ENDPOINT" ||
+      key === "AZURE_OPENAI_API_VERSION" ||
+      key === "DEFAULT_LLM_MODEL" ||
+      /^LOCAL_LLM_\d+_(BASE_URL|API_KEY)$/.test(key)
+    ) {
+      const kept = keepIfSet(value);
+      if (kept) {
+        updates[key] = kept;
+      }
+    }
+  }
+  return updates;
 }
 
 function resolveBrainApiKeys(startOutput) {
