@@ -13,7 +13,7 @@ Accounts and keys you will need:
 - [Clerk](https://dashboard.clerk.com) (required on Vercel / production)
 - [Supabase](https://supabase.com/dashboard) (hosted project, not local `supabase start`)
 - [Vercel](https://vercel.com)
-- Anthropic and Voyage API keys (this brain defaults to `voyage-3-lite`)
+- Anthropic and Voyage API keys (this brain defaults to `voyage-3-lite`). Optional: OpenRouter / OpenAI / xAI keys and `DEFAULT_LLM_MODEL` (BRA210)
 
 A random shared tool secret (`TOOL_API_KEY` / `MY_APP_API_KEY`) — generate a new one for hosted; do not reuse a value you are not sure about.
 
@@ -212,8 +212,10 @@ Minimum for a first Brain-enabled deploy:
 |---|---|
 | `TELOS_BRAIN_ORG_API_KEY` | Org key from step 2 (`tbk_…`). CLI only; never uploaded to the brain. |
 | `BRAIN_URL` | `https://go.telosbrain.com` |
-| `ANTHROPIC_API_KEY` | Required for this brain’s workflows |
+| `ANTHROPIC_API_KEY` | Required for the workflow `model:` pins unless a reachable brain default is set |
 | `VOYAGE_API_KEY` | Required (`voyage-3-lite`) |
+| `OPENROUTER_API_KEY` / `OPENAI_API_KEY` / `XAI_API_KEY` | Optional. For `openrouter/…`, `openai/…`, or `xai/…` |
+| `DEFAULT_LLM_MODEL` | Optional. Overrides workflow pins when the matching key exists (BRA210) |
 | `TOOL_API_KEY` | Shared tool handshake; deploy copies it to `MY_APP_API_KEY` |
 | `POSTGRES_URL` | Hosted Postgres |
 | Clerk + Supabase vars | From steps 3–4 |

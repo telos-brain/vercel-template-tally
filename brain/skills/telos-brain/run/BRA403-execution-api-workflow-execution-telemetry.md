@@ -1,17 +1,18 @@
 ---
 name: "Execution API: Workflow Execution & Telemetry"
 code: BRA403
-version: 12
+version: 17
 description: How to list a brain's workflows (with pending inbox-task counts),
   run them synchronously (SSE streaming) or asynchronously (fire-and-forget
   with callback), pass optional run variables for {{input.*}} template tags
   and pre-called input-tools (BRA409), hold a multi-turn chat session against
-  a single run, and retrieve run telemetry and unit-of-work telemetry via the
-  Execution API — including model, thinking mode and turn totals on run
+  a single run, stop an in-flight turn without closing the session
+  (POST /runs/{id}/stop), and retrieve run telemetry and unit-of-work telemetry
+  via the Execution API — including model, thinking mode and turn totals on run
   telemetry. Documents when a run settles Failed (max-turns exhausted, final
-  max_tokens with no retries). Also notes when a Completed run becomes
-  eligible for learning evals (BRA207). Documents SSRF rules for async
-  callbackUrl (allowed-callback-domains).
+  max_tokens with no retries). Also notes when a Completed, Failed, or
+  AwaitingInput run becomes eligible for learning evals (BRA207). Documents
+  SSRF rules for async callbackUrl (allowed-callback-domains).
 ---
 
 # Execution API: Workflow Execution & Telemetry
@@ -67,7 +68,8 @@ All fields are optional:
     "widget_reference": "WID-001",
     "current_date": "2026-07-30"
   },
-  "callbackUrl": "https://app.example.com/brain/callbacks/run-complete"
+  "callbackUrl": "https://app.example.com/brain/callbacks/run-complete",
+  "caller_jwt": "eyJhbGc..."
 }
 ```
 
@@ -78,6 +80,7 @@ All fields are optional:
 | `unitOfWorkId` | Optional runtime scope for template tags (e.g. `{{#unitOfWork.context}}`). Nothing is hard-coded into the prompt; workflows that need the logs declare those tags in Instructions. |
 | `variables` | Optional string→string map persisted on the `WorkflowRun` and exposed to templates as `{{input.<key>}}`. Omit or leave null for unchanged behaviour. Keys and values are plain strings (no type coercion). See [Run variables](#run-variables-input) and **BRA409**. |
 | `callbackUrl` | Honoured on the async path only. Must be `https` (or `http://localhost` / `http://127.0.0.1` in Development). Subject to the brain's shared outbound host allowlist — see [Async callback SSRF rules](#async-callback-ssrf-rules). |
+| `caller_jwt` | Optional opaque JWT forwarded as `Authorization: Bearer` on outbound calls for connectors with `auth-type: caller-jwt` (BRA274). Encrypted at rest on the `WorkflowRun`. Never logged or echoed. Nested `run_workflow` / workflow-tool child runs inherit it. Brain does not validate the token. Clerk JWTs often expire in ~60 seconds — on `/run/async`, tool dispatch may happen after expiry and the downstream API will 401. |
 
 ### Run variables (`variables` → `{{input.*}}`)
 
@@ -144,7 +147,7 @@ Full authoring guide: **BRA409**. Template taxonomy: **BRA204** §3.6.
 
 ### `POST /workflows/{code}/run/sync` — synchronous (SSE)
 
-Streams the result in real time as **Server-Sent Events**, mirroring the Claude streaming wire format. The run is created at status `Running` (never `Queued`).
+Streams the result in real time as **Server-Sent Events**. The run is created at status `Running` (never `Queued`). Live progress events (`status`, `thinking`, `tool_call`, `tool_result`, and on Claude `text`) are emitted while the loop works. On non-streaming providers the final reply is still chunked as `text` deltas after the loop.
 
 Rather than terminating, a successful sync run is **left open** as a chat session at status `AwaitingInput`, so you can continue the same conversation turn by turn (see [Chat Sessions](#chat-sessions)). It transitions to `Failed` on error or client disconnect. The stream begins with a `run_started` event carrying the run id you continue or close the session with.
 
@@ -160,11 +163,30 @@ Event stream:
 
 ```
 data: {"type": "run_started", "runId": "44291..."}
+data: {"type": "status", "phase": "model"}
+data: {"type": "thinking", "delta": "I should look up the customer first."}
+data: {"type": "tool_call", "name": "crm_lookup", "id": "toolu_01...", "input": {"customerId": "42"}}
+data: {"type": "tool_result", "name": "crm_lookup", "id": "toolu_01...", "ok": true, "output": {"name": "Acme"}}
 data: {"delta": "We", "type": "text"}
 data: {"delta": " currently", "type": "text"}
 data: {"delta": " have...", "type": "text"}
 data: {"type": "done"}
 ```
+
+Progress events are emitted **while the turn is running** so a harness chat UI can show steps (model wait, thinking, tool calls) instead of a silent wait. Unknown event types should be ignored so older clients stay compatible.
+
+| `type` | When | Fields |
+|---|---|---|
+| `run_started` | Immediately, before work begins | `runId` |
+| `status` | Each time the model is about to be called | `phase` (`model`) |
+| `thinking` | While the provider is generating reasoning | `delta` (token-level on Claude streaming; one blob on non-streaming providers) |
+| `tool_call` | Immediately before a tool is dispatched | `name`, `id`, `input` (JSON object when the arguments are JSON, otherwise a string) |
+| `tool_result` | After that tool returns | `name`, `id`, `ok`, `output` (JSON object when the result is JSON, otherwise a string) |
+| `text` | While the provider is writing the reply (Claude streaming), or after the loop if the call was non-streaming | `delta` |
+| `error` | Terminal failure | `message` |
+| `done` | Always last | — |
+
+On Claude, `thinking` and `text` deltas are the provider's own tokens as they are generated. `tool_call` / `tool_result` still fire around tool dispatch. Non-streaming providers keep the previous behaviour (thinking as one blob after the call; reply text chunked at the end).
 
 On failure, a terminal error event precedes `done`:
 
@@ -238,9 +260,9 @@ Running  →  AwaitingInput  ⇄  Running (next turn)  →  Completed
                     └──────────→  Completed (explicit close, or inactivity timeout)
 ```
 
-After each successful turn the run settles at `AwaitingInput` (open) with an `expiresDateUtc`. It is closed to `Completed` when you call `complete`, or automatically when its inactivity timeout passes (see [Session timeout](#session-timeout)). A run is only evaluated once it reaches a terminal status, so an open session is not evaluated until it closes.
+After each successful turn the run settles at `AwaitingInput` (open) with an `expiresDateUtc`. It is closed to `Completed` when you call `complete`, or automatically when its inactivity timeout passes (see [Session timeout](#session-timeout)). Manual **Run eval** can target a `Completed`, `Failed`, or `AwaitingInput` run (BRA207). Automatic evals still fire on `Completed`.
 
-**Cost and billing.** Each turn (including a sync call that leaves the run `AwaitingInput`) recalculates the run's LLM `CostCents` from its messages. Daily time-based charges include open sessions: the night job bills `RunSeconds - BilledSeconds` and then raises `BilledSeconds`, so a chat that stays open is charged that day and a later continuation only bills the unbilled remainder.
+**Cost and billing.** Each turn (including a sync call that leaves the run `AwaitingInput`) recalculates the run's LLM `CostCents` from its messages. OpenRouter turns that stored provider-billed `usage.cost` on every token-bearing message use that sum; otherwise cost is tokens × date-effective `LlmPrices` for the run's model (`openrouter` + catalogue id for OpenRouter). Daily time-based charges include open sessions: the night job bills `RunSeconds - BilledSeconds` and then raises `BilledSeconds`, so a chat that stays open is charged that day and a later continuation only bills the unbilled remainder.
 
 ### `POST /runs/{runId}/messages` — continue a session
 
@@ -262,6 +284,30 @@ Validated before the stream commits, so these are real HTTP statuses:
 
 A turn started here re-arms the session's `expiresDateUtc` from the moment it finishes, so an actively used session never times out.
 
+### `POST /runs/{runId}/stop` — stop an in-flight turn
+
+Stops the current turn if it is `Queued` or `Running` and leaves the session **open** (`AwaitingInput`) so you can send another message. This is not the same as `complete`: the run is not closed and is not evaluated automatically.
+
+Response `200 OK`:
+
+```json
+{
+  "runId": "44291...",
+  "status": "AwaitingInput"
+}
+```
+
+| Status | When |
+|---|---|
+| `200 OK` | The turn was stopped, or the run had already settled (idempotent). |
+| `404 Not Found` | No run with that id belongs to the brain. |
+
+Stopping aborts the in-flight turn, including any model request that is still in progress. Any assistant text already written stays on the run. The session timeout is re-armed from the moment of the stop. A connected SSE stream ends once the turn leaves `Queued` / `Running`.
+
+A client disconnect on `/run/sync` or `/messages` (idle timeout, closed socket) still **fails** the run. If a turn may run longer than the connection can stay open, use `/run/async` instead of relying on a dropped sync stream.
+
+To close the session after stopping, call `POST /runs/{runId}/complete`.
+
 ### `POST /runs/{runId}/complete` — close a session
 
 Closes an open session, transitioning it to `Completed` so it becomes eligible for
@@ -280,7 +326,7 @@ Response `200 OK`:
 }
 ```
 
-Idempotent: closing an already-`Completed` session also returns `200`. Returns `404 Not Found` when no such run belongs to the brain, and `409 Conflict` when the run cannot be closed in its current state (e.g. a turn is still in progress).
+Idempotent: closing an already-`Completed` session also returns `200`. Returns `404 Not Found` when no such run belongs to the brain, and `409 Conflict` when the run cannot be closed in its current state (e.g. a turn is still in progress — call `stop` first if you need to close immediately).
 
 ### Session timeout
 
@@ -390,6 +436,7 @@ Returns `404 Not Found` if the unit of work does not belong to the brain.
 | `POST` | `/workflows/{code}/run/sync` | Run workflow, stream SSE, open a chat session | `200` (stream) |
 | `POST` | `/workflows/{code}/run/async` | Queue workflow run | `202` |
 | `POST` | `/runs/{id}/messages` | Continue an open chat session (stream SSE) | `200` (stream) |
+| `POST` | `/runs/{id}/stop` | Stop an in-flight turn and leave the session open | `200` |
 | `POST` | `/runs/{id}/complete` | Close an open chat session | `200` |
 | `GET` | `/runs/{id}/telemetry` | Run telemetry (OTEL GenAI) | `200` |
 | `GET` | `/units-of-work/{id}/telemetry` | Merged context/data telemetry | `200` |

@@ -1,11 +1,12 @@
 ---
 name: Connectors
 code: BRA209
-version: 4
-description: How to author connector YAML files for external services (OAuth 2,
-  API key, or none). Covers file layout, brain-compose registration, parameter
-  declarations vs secret storage, url vs url-env for environment-specific base
-  URLs, deploy behaviour, and worked examples.
+version: 8
+description: "How to author connector YAML files for external services (OAuth 2,
+  API key, none, or caller-jwt). Covers file layout, brain-compose registration, optional
+  platform type (e.g. elevenlabs), parameter declarations vs secret storage,
+  url vs url-env, parameter secret: bindings, deploy behaviour, and worked
+  examples."
 tools:
   - list_schema_files
   - search_schema_files
@@ -32,11 +33,11 @@ schema edit tools are in **BRA203**.
 |---|---|---|
 | **Connector YAML** | `connectors/{name}.yml` | Name, URL, auth type, scope, **declared** auth parameters |
 | **Parameter values** (client id, API key, …) | Brain environment variables (from `.env` / Management API) | Encrypted secrets — **never** in the YAML |
-| **OAuth access / refresh tokens** | `ConnectorTokens` table (runtime) | Acquired via OAuth flow; not authored in the schema |
+| **OAuth access / refresh tokens** | Runtime (OAuth flow) | Acquired via OAuth; not authored in the schema |
 
 Connectors are **configuration**. Tokens are **runtime state**. Mixing them
-(e.g. stuffing tokens into `BrainEnvironmentVariables` as free-form keys) is
-rejected by design — see BRA196 / OAuth lifecycle docs.
+(e.g. stuffing tokens into environment variables as free-form keys) is
+rejected by design — keep tokens in the OAuth flow, not in schema files.
 
 ---
 
@@ -49,6 +50,7 @@ brain-schema/
     example-oauth2.yml
     example-api-key.yml
     example-none.yml
+    example-caller-jwt.yml
   tools/
   …
 ```
@@ -62,12 +64,13 @@ connectors:
   - connectors/example-oauth2.yml
   - connectors/example-api-key.yml
   - connectors/example-none.yml
+  - connectors/example-caller-jwt.yml
 ```
 
 Paths are relative to the compose file (no `./` prefix needed).
 
 Deploy order places **connectors before tools**, so tools can reference
-connector names via a top-level `connector:` field (BRA199). Connectors are
+connector names via a top-level `connector:` field. Connectors are
 optional — omit the key when unused.
 
 ---
@@ -81,7 +84,8 @@ Plain YAML (no markdown frontmatter). One connector per file. Path convention:
 name: my-connector                 # REQUIRED — unique per brain; used as the deploy key
 url: https://api.example.com       # XOR with url-env — static HTTPS base URL
 # url-env: ACME_API_URL            # XOR with url — brain env var name for the base URL
-auth-type: oauth2                  # REQUIRED — oauth2 | api-key | none
+auth-type: oauth2                  # REQUIRED — oauth2 | api-key | none | caller-jwt
+# type: elevenlabs                 # optional — platform identity (see Type below)
 scope: brain                       # optional — defaults to brain; only brain is valid today
 parameters:                         # optional — omit the key entirely when empty
   - name: client-id                # REQUIRED per parameter
@@ -97,10 +101,11 @@ parameters:                         # optional — omit the key entirely when em
 | `name` | yes | Unique per brain (`UQ_Connectors_BrainId_Name`). Stable identifier for schema paths and APIs. |
 | `url` | one of | Static HTTPS base URL (REST root or MCP endpoint). HTTP allowed only for localhost / `127.0.0.1` / `host.docker.internal` (**BRA106**). **Exactly one** of `url` or `url-env`. |
 | `url-env` | one of | Name of a brain environment variable (from `.env`) whose value is the base URL (HTTPS, or HTTP for those local hosts). Resolved at tool/OAuth dispatch — same schema, different domains per brain. |
-| `auth-type` | yes | Exactly one of: `oauth2`, `api-key`, `none`. |
+| `auth-type` | yes | Exactly one of: `oauth2`, `api-key`, `none`, `caller-jwt`. |
+| `type` | no | Optional platform identity. Free text; omit when unused. First convention value: `elevenlabs`. Distinct from `auth-type`. |
 | `scope` | no | Defaults to `brain`. Entity-scoped connectors are out of scope for now. |
-| `api-key-header` | no | For `api-key` auth only (BRA199). Header name for the key. Omit or blank → `Authorization: Bearer {key}`. Example: `X-Api-Key`. |
-| `parameters` | no | List of `{ name, description }`. Omit the key when there are none — do **not** emit `parameters: []`. |
+| `api-key-header` | no | For `api-key` auth only. Header name for the key. Omit or blank → `Authorization: Bearer {key}`. Example: `X-Api-Key`. |
+| `parameters` | no | List of `{ name, description, secret? }`. For `api-key` auth, `secret` on the `api-key` (or `api_key`) parameter names the brain environment variable (same field as tool parameters). When omitted, api-key auth reads `CONNECTOR_{connectorId}_CLIENT_SECRET`. Parsed on every parameter; only api-key dispatch uses it today. Omit the `parameters` key when there are none — do **not** emit `parameters: []`. |
 
 ### Auth types
 
@@ -109,6 +114,23 @@ parameters:                         # optional — omit the key entirely when em
 | `oauth2` | Interactive OAuth 2 — access/refresh tokens managed at runtime |
 | `api-key` | Static API key (or similar) supplied as a secret |
 | `none` | Public endpoint; no credentials |
+| `caller-jwt` | Forwards the Execute API `caller_jwt` as `Authorization: Bearer` on outbound tool calls. No stored credentials — omit `parameters`. Brain does not validate the JWT. |
+
+### Type (platform identity)
+
+`type` is an **optional** discriminator for platform-specific services. It is
+free text with **no check constraint** — omit the key when the connector is a
+generic REST/MCP endpoint. The first convention value is:
+
+| `type` | Used for |
+|---|---|
+| `elevenlabs` | ElevenLabs Conversational AI. The deployment handler (BRA259) finds this connector on the brain and reads the `api-key` parameter's `secret:` (or `CONNECTOR_{connectorId}_CLIENT_SECRET` when that field is omitted) as the `xi-api-key`. Pair with a workflow that sets `deployment-type: elevenlabs_conversational_ai` (BRA201 §8.3). |
+
+A brain should declare **at most one** connector of each platform type. The
+deployment handler picks the first by name and logs a warning if several match.
+
+This is **not** the same field as a workflow's `type` (`TOOL` / `RUNNABLE` / …)
+or a tool's execution block.
 
 ### Parameters vs secrets
 
@@ -116,7 +138,12 @@ parameters:                         # optional — omit the key entirely when em
   UI, deploy, and future OAuth wiring).
 - **Values** are stored as brain environment variables (encrypted at rest) —
   upload them via `.env` on deploy (**BRA202**) or the Management API secrets
-  endpoint (connector-scoped keys such as `CONNECTOR_{connectorId}_CLIENT_ID`).
+  endpoint. For **api-key** auth, bind the key with `secret:` on the `api-key`
+  parameter (same field as tools). When `secret:` is omitted the platform
+  reads `CONNECTOR_{connectorId}_CLIENT_SECRET`.
+- OAuth **client** credentials and access/refresh tokens are still the Connect
+  flow (`CONNECTOR_{connectorId}_CLIENT_ID` / `_CLIENT_SECRET` plus tokens).
+  `secret:` on OAuth parameters is stored but not used at OAuth runtime yet.
 - Never put client secrets, API keys, or tokens in the connector YAML.
 
 ---
@@ -150,6 +177,7 @@ api-key-header: X-Api-Key
 parameters:
   - name: api-key
     description: API key for authenticating outbound calls to this service.
+    secret: ACME_API_KEY
 ```
 
 ### 4.3 No auth — `connectors/example-none.yml`
@@ -163,7 +191,20 @@ scope: brain
 
 No `parameters` key — empty lists are omitted.
 
-### 4.4 Environment-specific base URL — `url-env`
+### 4.4 Caller JWT — `connectors/example-caller-jwt.yml`
+
+```yaml
+name: example-caller-jwt
+url: https://api.example.com
+auth-type: caller-jwt
+scope: brain
+```
+
+No stored credentials. The harness passes `caller_jwt` on `POST /workflows/{code}/run/sync` or `/run/async`. Brain injects it as `Authorization: Bearer` at dispatch. If the JWT is missing, the tool call fails with a clear error.
+
+**Async expiry caveat:** Clerk JWTs typically expire in ~60 seconds. On `/run/async`, Hangfire may dispatch tools after the JWT has expired; the downstream API will return 401, which Brain surfaces as a tool error. Use `caller-jwt` on async runs only when the token lifetime covers expected dispatch delay, or when the downstream service accepts longer-lived tokens.
+
+### 4.5 Environment-specific base URL — `url-env`
 
 When the same schema must hit different hosts in test vs production, declare
 `url-env` instead of a literal `url`, and put the URL value in each brain's
@@ -179,6 +220,7 @@ api-key-header: X-Api-Key
 parameters:
   - name: api-key
     description: API key for Acme.
+    secret: ACME_API_KEY
 ```
 
 ```bash
@@ -200,7 +242,36 @@ When the Brain runs in Docker and the API is on the developer machine, put
 container is the Brain container, not the host. Full local-stack instructions
 are in **BRA106**.
 
-### 4.5 Referencing a connector from a tool (BRA199 / BRA200)
+### 4.6 ElevenLabs platform connector
+
+Use `type: elevenlabs` so workflow deployment can find this connector. Auth is
+normally `api-key`. Name the `.env` variable with `secret:` on the `api-key`
+parameter (same field as tools). When `secret:` is omitted the handler falls
+back to `CONNECTOR_{connectorId}_CLIENT_SECRET`. Never put the key in the YAML.
+The handler calls `https://api.elevenlabs.io` and sets `xi-api-key` on the
+request.
+
+```yaml
+name: elevenlabs
+url: https://api.elevenlabs.io
+auth-type: api-key
+type: elevenlabs
+scope: brain
+parameters:
+  - name: api-key
+    description: ElevenLabs xi-api-key. Store the value as a brain environment variable — never commit it here.
+    secret: ELEVENLABS_API_KEY
+```
+
+```bash
+# .env — uploaded on deploy (BRA202)
+ELEVENLABS_API_KEY=xi-...
+```
+
+Workflows that should be projected as ElevenLabs agents also need
+`deployment-type: elevenlabs_conversational_ai` — see **BRA201** §8.3.
+
+### 4.7 Referencing a connector from a tool
 
 API and MCP tools may omit a connector (inline URL / server) or point at one:
 
@@ -238,7 +309,8 @@ On `brain deploy`:
    by `(BrainId, Name)`.
 3. Declared parameters are **replaced wholesale** for that connector.
 4. There is **no version field** — a redeploy always applies the incoming
-   Name / Url / AuthType / Scope / parameters (upsert-always, like entity types).
+   Name / Url / UrlEnv / AuthType / Type / Scope / ApiKeyHeader /
+   parameters (including each parameter's `secret:`) (upsert-always, like entity types).
 
 Validate with `npm run deploy:dry` before deploying.
 
@@ -252,7 +324,7 @@ Schema system tools (**BRA203**) treat connectors as first-class schema files:
 |---|---|
 | `list_schema_files` / `search_schema_files` | Yes — type token `connector`, path `connectors/{name}.yml` |
 | `get_schema_file` | Yes — returns canonical YAML |
-| `update_schema_file` | Yes — exact-one-match string replace, then upsert via `IConnectorService` |
+| `update_schema_file` | Yes — exact-one-match string replace, then the connector definition is saved |
 | `create_schema_file` | **Not yet** for `connectors/…` — create via deploy (add file + compose entry) |
 
 `brain-compose.yml` remains read-only via `update_schema_file`.
@@ -262,12 +334,14 @@ Schema system tools (**BRA203**) treat connectors as first-class schema files:
 ## 7. Authoring checklist
 
 1. Create `connectors/{name}.yml` with `name`, exactly one of `url` / `url-env`,
-   and `auth-type`.
-2. Add declared `parameters` (name + description only) when the connector needs
-   credentials; omit the key when it does not.
+   and `auth-type`. Set `type` when the connector backs a platform (e.g.
+   `elevenlabs`).
+2. Add declared `parameters` (`name` + `description`; optional `secret:` for
+   api-key env-var bindings) when the connector needs credentials; omit the
+   key when it does not.
 3. List the path under `connectors:` in `brain-compose.yml`.
-4. Put secret **values** and any `url-env` URL values in `.env` (or the secrets
-   API) — never in the YAML.
+4. Put secret **values**, any `url-env` URL values, and any parameter `secret:`
+   values in `.env` (or the secrets API) — never in the YAML.
 5. Use British English in descriptions.
 6. Dry-run deploy, then deploy.
 
@@ -277,6 +351,6 @@ Schema system tools (**BRA203**) treat connectors as first-class schema files:
 
 | Skill | Topic |
 |---|---|
-| **BRA201** | Full brain schema authoring reference (connectors summarised in §5A) |
+| **BRA201** | Full brain schema authoring reference (connectors in §5A; workflow `deployment-type` in §8.3) |
 | **BRA202** | Environment variables, encryption, secret injection into tools |
 | **BRA203** | Schema system tools (list / get / update connector files) |

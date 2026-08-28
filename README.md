@@ -8,9 +8,10 @@ Demo app (Next.js, Clerk, Supabase) with a Telos Brain schema in `brain/` with t
 - Docker Desktop (or Engine + Compose on Linux, or equivalent like OrbStack).
 - [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started) (`brew install supabase/tap/supabase`)
 - A [Clerk](https://clerk.com) account (optional locally; required for stage/prod)
-- An [Anthropic](https://console.anthropic.com) API key
+- An [Anthropic](https://console.anthropic.com) API key (workflows pin `anthropic/claude-sonnet-4-6`; compaction uses Haiku)
 - A [Voyage](https://dash.voyageai.com) API key (embeddings; this brain defaults to `voyage-3-lite`)
   - Add Anthropic and VoyageAI keys before running the 'brain deploy' step.
+- Optional: [OpenRouter](https://openrouter.ai), [OpenAI](https://platform.openai.com), [xAI](https://console.x.ai), or a local Ollama / llama.cpp runner (BRA106 §8 / BRA210)
 
 | Environment | App | Brain |
 |---|---|---|
@@ -33,7 +34,7 @@ npm install
 
 You can run the same flow later with `npm run prepare`. Skip it with `TEL_SKIP_PREPARE=1` (CI skips automatically). `npm run stack:reset` stops this repo's local Brain (and deletes its Docker SQL volume) and this project's Supabase. It does not stop other Compose stacks. Then `npm run prepare` to start clean.
 
-Then fill `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`, and any remaining `MY_APP_*` values in `brain/.env.local`. Do not commit `.env` files.
+Then fill `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`, and any remaining `MY_APP_*` values in `brain/.env.local`. Optionally set `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `LOCAL_LLM_1_BASE_URL`, or `DEFAULT_LLM_MODEL` (BRA210). Do not commit `.env` files.
 
 Optional app vars (already defaulted in code):
 
@@ -92,7 +93,15 @@ ANTHROPIC_API_KEY=your-anthropic-api-key
 VOYAGE_API_KEY=your-voyage-api-key
 MY_APP_API_URL=http://host.docker.internal:3000
 # MY_APP_API_KEY and BRAIN_API_KEY are already set by npm prepare script.
+
+# Optional — point every workflow at one provider/model (BRA210):
+# OPENROUTER_API_KEY=
+# DEFAULT_LLM_MODEL=openrouter/anthropic/claude-sonnet-4.6
+# LOCAL_LLM_1_BASE_URL=http://host.docker.internal:11434/v1
+# DEFAULT_LLM_MODEL=local_1/qwen3:8b
 ```
+
+Workflows pin Anthropic so a brain with only `ANTHROPIC_API_KEY` still runs. A reachable brain default (`DEFAULT_LLM_MODEL`, Settings **Default LLM model**, or compose `llm-model`) overrides those pins. After changing models or local-runner URLs, redeploy. From Brain-in-Docker, Ollama on the host must use `host.docker.internal`, not `localhost`. Voyage is still required for embeddings — a local LLM does not replace it.
 
 Leave the `TELOS_*` values that `brain start` wrote — they are the well-known local org key and `http://127.0.0.1:60061`. `TELOS_*` is CLI config only; it is never uploaded to the brain.
 
@@ -159,8 +168,11 @@ Set these on **Production** and **Preview** (different values, like `POSTGRES_UR
 | Variable | Purpose |
 |---|---|
 | `TELOS_BRAIN_ORG_API_KEY` | Org key from go.telosbrain.com (CLI only, never uploaded to the brain) |
-| `ANTHROPIC_API_KEY` | Required for this brain’s workflows |
+| `ANTHROPIC_API_KEY` | Required for the workflow `model:` pins unless a reachable brain default is set |
 | `VOYAGE_API_KEY` | Required (`voyage-3-lite` embeddings) |
+| `OPENROUTER_API_KEY` | Optional. For `openrouter/…` models |
+| `OPENAI_API_KEY` / `XAI_API_KEY` | Optional. For `openai/…` or `xai/…` models |
+| `DEFAULT_LLM_MODEL` | Optional. e.g. `openrouter/anthropic/claude-sonnet-4.6` — overrides workflow pins when the matching key exists |
 | `TOOL_API_KEY` | Shared tool handshake; copied to `MY_APP_API_KEY` on deploy |
 | `BRAIN_URL` | App-side Execution API: `https://go.telosbrain.com` |
 | `BRAIN_API_KEY` | Per-brain execution key (see first deploy below) |

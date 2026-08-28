@@ -9,6 +9,7 @@
  * keys, and runs `npm run db:push`. After this finishes, fill
  * ANTHROPIC_API_KEY, VOYAGE_API_KEY, and any remaining MY_APP_* values in
  * brain/.env.local, then `brain deploy --env local --instance local-brain`.
+ * Optional: OPENROUTER_API_KEY, LOCAL_LLM_1_BASE_URL, DEFAULT_LLM_MODEL (BRA210).
  * BRAIN_API_KEY is copied from `brain start` (status box and brain.lock
  * local.apiKey) into .env and brain/.env.local. If start cannot re-print the
  * key (instance already in the Docker volume) and neither env file has a real
@@ -167,8 +168,9 @@ function printPrerequisites() {
   bullet("Supabase CLI", "brew install supabase/tap/supabase");
   hint("https://supabase.com/docs/guides/local-development/cli/getting-started");
   bullet("A Clerk account", "optional locally; required for stage/prod");
-  bullet("An Anthropic API key");
+  bullet("An Anthropic API key", "workflows pin Anthropic unless DEFAULT_LLM_MODEL is set");
   bullet("A Voyage API key", "embeddings; this brain defaults to voyage-3-lite");
+  hint("Optional: OpenRouter / OpenAI / xAI keys, or LOCAL_LLM_1_BASE_URL for Ollama (BRA106 §8).");
   hint("Add Anthropic and Voyage keys in brain/.env.local before the 'brain deploy' step.");
   console.log("");
 }
@@ -182,6 +184,7 @@ function printDone(brainApiKey) {
   note("This script does not set these:");
   bullet(paint(`${s.bold}${s.brightMagenta}`, "ANTHROPIC_API_KEY"));
   bullet(paint(`${s.bold}${s.brightMagenta}`, "VOYAGE_API_KEY"));
+  bullet("optional OPENROUTER_API_KEY / DEFAULT_LLM_MODEL / LOCAL_LLM_1_BASE_URL");
   bullet("any other MY_APP_* values you need");
   hint("MY_APP_API_KEY was generated; MY_APP_API_URL defaults to http://host.docker.internal:3000");
 

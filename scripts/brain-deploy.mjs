@@ -54,6 +54,7 @@ function main() {
   const voyageKey = keepIfSet(process.env.VOYAGE_API_KEY);
   const toolApiKey = keepIfSet(process.env.MY_APP_API_KEY) ?? keepIfSet(process.env.TOOL_API_KEY);
   const brainApiKey = keepIfSet(process.env.BRAIN_API_KEY);
+  const optionalLlmEnv = collectOptionalLlmEnv();
   const appUrl = resolveAppUrl();
   console.log(`MY_APP_API_URL=${appUrl}`);
 
@@ -88,6 +89,7 @@ function main() {
     MY_APP_API_KEY: toolApiKey,
     MY_APP_API_URL: appUrl,
     BRAIN_API_KEY: brainApiKey ?? "",
+    ...optionalLlmEnv,
   });
 
   const callbackHosts = collectCallbackHosts(appUrl);
@@ -106,6 +108,7 @@ function main() {
     VOYAGE_API_KEY: voyageKey,
     MY_APP_API_KEY: toolApiKey,
     MY_APP_API_URL: appUrl,
+    ...optionalLlmEnv,
   };
   if (brainApiKey) {
     childEnv.BRAIN_API_KEY = brainApiKey;
@@ -128,6 +131,32 @@ function main() {
 function isSkip() {
   const value = process.env.BRAIN_DEPLOY;
   return value === "0" || value === "false" || value === "no";
+}
+
+/**
+ * Optional LLM credentials declared in brain/.env.example. Blank values are
+ * skipped so a missing Vercel secret does not wipe a placeholder line.
+ *
+ * @returns {Record<string, string>}
+ */
+function collectOptionalLlmEnv() {
+  /** @type {Record<string, string>} */
+  const updates = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (
+      key === "OPENAI_API_KEY" ||
+      key === "XAI_API_KEY" ||
+      key === "OPENROUTER_API_KEY" ||
+      key === "DEFAULT_LLM_MODEL" ||
+      /^LOCAL_LLM_\d+_(BASE_URL|API_KEY)$/.test(key)
+    ) {
+      const kept = keepIfSet(value);
+      if (kept) {
+        updates[key] = kept;
+      }
+    }
+  }
+  return updates;
 }
 
 function resolveDeployEnv() {
