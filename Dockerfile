@@ -18,8 +18,9 @@ RUN apt-get update \
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
 
+# Bind-mounts overwrite /app (app) and ${PWD} (init). Keep scripts executable
+# in git (100755); do not chmod here — it would not survive the mount.
 COPY . .
-RUN chmod +x ./scripts/docker-dev-entrypoint.sh ./scripts/compose-init.sh
 
 EXPOSE 3000
 
@@ -31,6 +32,9 @@ CMD ["npm", "run", "dev", "--", "--hostname", "0.0.0.0", "--port", "3000"]
 FROM dev AS stack-init
 
 ARG TARGETARCH
+# Compose-init CLI pins (this image only). Host `brew install supabase` is
+# independent — bump these ARGs when the stack-init image should match a
+# newer CLI. Docker CLI / Compose plugin only talk to the mounted socket.
 ARG SUPABASE_CLI_VERSION=2.116.0
 ARG DOCKER_CLI_VERSION=27.5.1
 ARG DOCKER_COMPOSE_VERSION=2.36.2
@@ -46,8 +50,7 @@ RUN apt-get update \
         -o /usr/local/lib/docker/cli-plugins/docker-compose \
     && chmod +x /usr/local/lib/docker/cli-plugins/docker-compose \
     && curl -fsSL "https://github.com/supabase/cli/releases/download/v${SUPABASE_CLI_VERSION}/supabase_${SUPABASE_CLI_VERSION}_linux_${TARGETARCH}.tar.gz" \
-        | tar -xz -C /usr/local/bin supabase \
-    && chmod +x /app/scripts/compose-init.sh
+        | tar -xz -C /usr/local/bin supabase
 
 ENV TEL_COMPOSE=1 \
     TEL_SKIP_PREPARE=0

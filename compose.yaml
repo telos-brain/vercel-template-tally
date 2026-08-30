@@ -5,6 +5,7 @@
 #
 # Docker-only (init runs prepare.mjs via the host Docker socket, then starts the app):
 #   docker compose --profile stack up -d
+#   docker compose --profile stack run --rm init ./scripts/compose-deploy.sh
 #
 # Brain still starts with `brain start` (TEL1251), not a hand-written Brain+SQL service.
 # Requires Docker Compose v2.24+ (`depends_on.required`, optional `env_file`).

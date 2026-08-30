@@ -10,7 +10,8 @@
  * Prints README prerequisites, then starts Supabase and Brain, writes env
  * keys, and runs `npm run db:push`. After this finishes, fill
  * ANTHROPIC_API_KEY, VOYAGE_API_KEY, and any remaining MY_APP_* values in
- * brain/.env.local, then `brain deploy --env local --instance local-brain`.
+ * brain/.env.local, then `brain deploy --env local --instance local-brain`
+ * (Compose init: `docker compose --profile stack run --rm init ./scripts/compose-deploy.sh`).
  * Optional: OPENROUTER_API_KEY, AZURE_OPENAI_*, LOCAL_LLM_1_BASE_URL,
  * DEFAULT_LLM_MODEL (BRA210).
  * BRAIN_API_KEY is copied from `brain start` (status box and brain.lock
@@ -23,6 +24,7 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { copyFileSync, existsSync, readFileSync } from "node:fs";
+import { createConnection } from "node:net";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readComposeProjectId, readLocalLockApiKey, resolveBrainCli } from "./brain-cli.mjs";
@@ -87,6 +89,11 @@ async function main() {
     cwd: root,
   });
 
+  if (isComposeInit()) {
+    step("Waiting for Postgres");
+    await waitForPostgres();
+  }
+
   step("Writing Supabase keys into .env");
   ensureCopied(appEnvExamplePath, appEnvPath);
   upsertEnvFile(appEnvPath, readSupabaseEnv());
@@ -102,7 +109,7 @@ async function main() {
     step("Using package Brain CLI (TEL_COMPOSE)");
     if (!resolveBrainCli(root)) {
       throw new Error(
-        "Brain CLI package not found in node_modules. Rebuild the image (`docker compose build`).",
+        "Brain CLI package not found in node_modules. Recreate the volume and rebuild: `docker compose --profile stack down -v && docker compose build`.",
       );
     }
     note("Skipping global `npm install -g @telos.ready/brain` — using node_modules.");
@@ -127,8 +134,10 @@ async function main() {
   try {
     startOutput = await runBrainAndCapture(["start"], { cwd: brainDir });
   } catch (error) {
-    if (isComposeInit() && (await isBrainReachable())) {
-      warn("brain start failed but the local Brain API is already reachable — continuing.");
+    const captured = commandOutput(error);
+    if (isComposeInit() && isExpectedBrainAlreadyUp(captured) && (await isBrainReachable())) {
+      warn("brain start reported the instance already exists and the API is reachable — continuing.");
+      startOutput = captured;
     } else {
       throw error;
     }
@@ -219,27 +228,10 @@ function printDone(brainApiKey) {
   heading("Last step");
   note("Add those keys, then run:");
   if (isComposeInit()) {
-    printCommand(
-      "docker",
-      [
-        "compose",
-        "--profile",
-        "stack",
-        "run",
-        "--rm",
-        "-w",
-        "/app/brain",
-        "init",
-        "node",
-        "/app/node_modules/@telos.ready/brain/dist/index.js",
-        "deploy",
-        "--env",
-        "local",
-        "--instance",
-        "local-brain",
-      ],
-      { cwd: root },
-    );
+    printCommand("docker", ["compose", "--profile", "stack", "run", "--rm", "init", "./scripts/compose-deploy.sh"], {
+      cwd: root,
+    });
+    note("That wrapper proxies 127.0.0.1 to the host, then deploys from this repo (not /app).");
     note("The app container starts after this init job exits.");
   } else {
     printCommand("brain", ["deploy", "--env", "local", "--instance", "local-brain"], { cwd: brainDir });
@@ -279,6 +271,128 @@ async function isBrainReachable() {
   } catch {
     return false;
   }
+}
+
+/**
+ * Only ignore a failed `brain start` when the CLI said the instance is already
+ * there (409 / already created). A reachable /api/health alone is not enough.
+ *
+ * @param {string} text
+ */
+function isExpectedBrainAlreadyUp(text) {
+  const normalized = String(text).replace(/\u001b\[[0-9;]*m/g, "");
+  return (
+    /\b409\b/.test(normalized) ||
+    /already created/i.test(normalized) ||
+    /already exists/i.test(normalized) ||
+    /already running/i.test(normalized)
+  );
+}
+
+/**
+ * @param {unknown} error
+ */
+function commandOutput(error) {
+  if (error && typeof error === "object" && "output" in error && typeof error.output === "string") {
+    return error.output;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
+/**
+ * Compose init uses `supabase start --ignore-health-check` so CLI probes can
+ * pass through socat before the published port is up. Wait for Postgres
+ * before `supabase status` / `db:push`.
+ */
+async function waitForPostgres() {
+  const timeoutMs = 120_000;
+  const intervalMs = 2_000;
+  const started = Date.now();
+
+  while (Date.now() - started < timeoutMs) {
+    const status = tryReadSupabaseStatus();
+    const dbUrl = typeof status?.DB_URL === "string" ? status.DB_URL : "";
+    const { host, port } = postgresHostPort(dbUrl);
+    if (await canConnect(host, port)) {
+      ok(`Postgres is accepting connections at ${host}:${port}`);
+      return;
+    }
+    await sleep(intervalMs);
+  }
+
+  throw new Error(
+    "Postgres did not become reachable after supabase start --ignore-health-check. Check Docker and port 54322.",
+  );
+}
+
+/**
+ * @returns {Record<string, unknown> | undefined}
+ */
+function tryReadSupabaseStatus() {
+  try {
+    const raw = execFileSync("supabase", ["status", "-o", "json"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return parseJsonObject(raw);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * @param {string} dbUrl
+ * @returns {{ host: string, port: number }}
+ */
+function postgresHostPort(dbUrl) {
+  if (dbUrl) {
+    try {
+      const parsed = new URL(dbUrl);
+      const port = Number(parsed.port);
+      if (parsed.hostname && Number.isFinite(port) && port > 0) {
+        return { host: parsed.hostname, port };
+      }
+    } catch {
+      // fall through to the template default
+    }
+  }
+  return { host: "127.0.0.1", port: 54322 };
+}
+
+/**
+ * @param {string} host
+ * @param {number} port
+ * @param {number} [timeoutMs]
+ */
+function canConnect(host, port, timeoutMs = 2000) {
+  return new Promise((resolve) => {
+    const socket = createConnection({ host, port }, () => {
+      socket.end();
+      resolve(true);
+    });
+    socket.setTimeout(timeoutMs);
+    socket.on("error", () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.on("timeout", () => {
+      socket.destroy();
+      resolve(false);
+    });
+  });
+}
+
+/**
+ * @param {number} ms
+ */
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function getSkipReason() {
@@ -543,7 +657,10 @@ function runAndCapture(command, args, options = {}) {
     child.on("error", reject);
     child.on("close", (code) => {
       if (code !== 0) {
-        reject(new Error(`${command} ${args.join(" ")} exited ${code}`));
+        /** @type {Error & { output: string }} */
+        const error = new Error(`${command} ${args.join(" ")} exited ${code}`);
+        error.output = output;
+        reject(error);
         return;
       }
       resolve(output);

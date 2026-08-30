@@ -179,14 +179,24 @@ docker compose --profile stack up -d
 Then fill `ANTHROPIC_API_KEY` / `VOYAGE_API_KEY` in `brain/.env.local` and deploy the schema (from the host if you have the Brain CLI, or via the init image):
 
 ```bash
-docker compose --profile stack run --rm -w /app/brain init \
-  node /app/node_modules/@telos.ready/brain/dist/index.js \
-  deploy --env local --instance local-brain
+docker compose --profile stack run --rm init ./scripts/compose-deploy.sh
 ```
+
+That wrapper starts the same loopback proxies as init, then runs the package Brain CLI from this repo (`$PWD/brain`). Do not use `-w /app/brain` — init mounts `${PWD}:${PWD}`, and the image copy at `/app` has no `brain/.env.local`.
 
 Open [http://localhost:3000](http://localhost:3000). Brain admin: [http://127.0.0.1:60061](http://127.0.0.1:60061). The app container reaches Supabase and Brain on the host via `host.docker.internal`; the browser still uses published localhost ports (`:3000`, `:54321`, `:60061`).
 
-Bind-mounts the repo so `next dev` reloads. After `package.json` changes: `docker compose build`. Give Docker Desktop at least 8 GB RAM — Next.js compile plus local Supabase can OOM the app container on a smaller VM.
+Bind-mounts the repo so `next dev` reloads. After `package.json` or lockfile changes, recreate the named `app_node_modules` volume — `docker compose build` alone does not refresh it (the volume overlays `/app/node_modules`):
+
+```bash
+docker compose --profile stack down -v
+docker compose build
+docker compose --profile stack up -d
+```
+
+`down -v` only removes this project's `app_node_modules`. Brain SQL is a different Compose project and is not affected.
+
+The stack-init image pins Supabase CLI / Docker CLI versions in the Dockerfile (`SUPABASE_CLI_VERSION`, `DOCKER_CLI_VERSION`, `DOCKER_COMPOSE_VERSION`). Those are independent of a host `brew` install. Give Docker Desktop at least 8 GB RAM — Next.js compile plus local Supabase can OOM the app container on a smaller VM.
 
 ## Stage and production (Vercel + Telos Hosted)
 
