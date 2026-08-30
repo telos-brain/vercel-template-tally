@@ -169,9 +169,10 @@ npm run stack:reset   # stop this repo's Brain (--reset), Supabase, and Compose 
 docker compose up -d
 ```
 
-**Stack (Docker only)** — init mounts the Docker socket, runs `scripts/prepare.mjs` (`supabase start`, `brain start`, keys, `db:push`), then starts the app. Host tools: Docker only.
+**Stack (Docker only)** — init mounts the Docker socket, runs `scripts/prepare.mjs` (`supabase start`, `brain start`, keys, `db:push`), then starts the app. Host tools: Docker only. Init proxies published loopback ports (`54322`, `60061`, …) to `host.docker.internal` so those CLIs can health-check from inside the container.
 
 ```bash
+# from the repo root (PWD must be the host project path)
 docker compose --profile stack up -d
 ```
 
@@ -185,7 +186,7 @@ docker compose --profile stack run --rm -w /app/brain init \
 
 Open [http://localhost:3000](http://localhost:3000). Brain admin: [http://127.0.0.1:60061](http://127.0.0.1:60061). The app container reaches Supabase and Brain on the host via `host.docker.internal`; the browser still uses published localhost ports (`:3000`, `:54321`, `:60061`).
 
-Bind-mounts the repo so `next dev` reloads. After `package.json` changes: `docker compose build`.
+Bind-mounts the repo so `next dev` reloads. After `package.json` changes: `docker compose build`. Give Docker Desktop at least 8 GB RAM — Next.js compile plus local Supabase can OOM the app container on a smaller VM.
 
 ## Stage and production (Vercel + Telos Hosted)
 

@@ -80,7 +80,12 @@ async function main() {
   requireDocker();
 
   step("Starting Supabase");
-  run("supabase", ["start"], { cwd: root });
+  // From Compose init, health checks hit 127.0.0.1 inside the container.
+  // compose-init.sh proxies those ports to the host; --ignore-health-check
+  // avoids a race before the published port is reachable.
+  run("supabase", isComposeInit() ? ["start", "--ignore-health-check"] : ["start"], {
+    cwd: root,
+  });
 
   step("Writing Supabase keys into .env");
   ensureCopied(appEnvExamplePath, appEnvPath);
@@ -118,7 +123,16 @@ async function main() {
   });
 
   step("Starting Brain");
-  let startOutput = await runBrainAndCapture(["start"], { cwd: brainDir });
+  let startOutput = "";
+  try {
+    startOutput = await runBrainAndCapture(["start"], { cwd: brainDir });
+  } catch (error) {
+    if (isComposeInit() && (await isBrainReachable())) {
+      warn("brain start failed but the local Brain API is already reachable — continuing.");
+    } else {
+      throw error;
+    }
+  }
 
   // Let `brain start` create `.env.local` when it is missing so it can seed
   // the well-known TELOS_* local keys. Only fall back to the example if the
@@ -254,6 +268,17 @@ function printDone(brainApiKey) {
 
 function isComposeInit() {
   return truthy(process.env.TEL_COMPOSE);
+}
+
+async function isBrainReachable() {
+  try {
+    const response = await fetch("http://127.0.0.1:60061/api/health", {
+      signal: AbortSignal.timeout(3000),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 function getSkipReason() {

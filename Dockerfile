@@ -19,7 +19,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
 
 COPY . .
-RUN chmod +x ./scripts/docker-dev-entrypoint.sh
+RUN chmod +x ./scripts/docker-dev-entrypoint.sh ./scripts/compose-init.sh
 
 EXPOSE 3000
 
@@ -32,12 +32,22 @@ FROM dev AS stack-init
 
 ARG TARGETARCH
 ARG SUPABASE_CLI_VERSION=2.116.0
+ARG DOCKER_CLI_VERSION=27.5.1
+ARG DOCKER_COMPOSE_VERSION=2.36.2
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl docker.io \
+    && apt-get install -y --no-install-recommends ca-certificates curl socat \
     && rm -rf /var/lib/apt/lists/* \
+    && DOCKER_ARCH="$([ "$TARGETARCH" = "arm64" ] && echo aarch64 || echo x86_64)" \
+    && curl -fsSL "https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/docker-${DOCKER_CLI_VERSION}.tgz" \
+        | tar -xz -C /usr/local/bin --strip-components=1 docker/docker \
+    && mkdir -p /usr/local/lib/docker/cli-plugins \
+    && curl -fsSL "https://github.com/docker/compose/releases/download/v${DOCKER_COMPOSE_VERSION}/docker-compose-linux-${DOCKER_ARCH}" \
+        -o /usr/local/lib/docker/cli-plugins/docker-compose \
+    && chmod +x /usr/local/lib/docker/cli-plugins/docker-compose \
     && curl -fsSL "https://github.com/supabase/cli/releases/download/v${SUPABASE_CLI_VERSION}/supabase_${SUPABASE_CLI_VERSION}_linux_${TARGETARCH}.tar.gz" \
-        | tar -xz -C /usr/local/bin supabase
+        | tar -xz -C /usr/local/bin supabase \
+    && chmod +x /app/scripts/compose-init.sh
 
 ENV TEL_COMPOSE=1 \
     TEL_SKIP_PREPARE=0

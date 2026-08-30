@@ -60,7 +60,8 @@ export const AuthenticationCheck = ({
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50 p-6">
         <p className="text-sm text-gray-600">
-          Could not start the local session. Refresh the page.
+          Could not start the local session. The database may not be
+          reachable yet. Wait for Supabase, then refresh the page.
         </p>
       </div>
     );

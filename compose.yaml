@@ -21,6 +21,7 @@ services:
         required: false
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    restart: unless-stopped
     environment:
       WATCHPACK_POLLING: "true"
       TEL_SKIP_PREPARE: "1"
@@ -39,7 +40,9 @@ services:
     build:
       context: .
       target: stack-init
-    working_dir: /app
+    # Same path on host and in the container so `supabase start` bind-mounts
+    # (e.g. supabase/snippets) resolve on the host Docker daemon.
+    working_dir: ${PWD}
     env_file:
       - path: .env
         required: false
@@ -49,13 +52,13 @@ services:
       TEL_COMPOSE: "1"
       TEL_SKIP_PREPARE: "0"
     volumes:
-      - .:/app
-      - app_node_modules:/app/node_modules
+      - ${PWD}:${PWD}
+      - app_node_modules:${PWD}/node_modules
       - /var/run/docker.sock:/var/run/docker.sock
     restart: "no"
     networks:
       - tally
-    command: ["node", "scripts/prepare.mjs"]
+    command: ["./scripts/compose-init.sh"]
 
 volumes:
   app_node_modules:
