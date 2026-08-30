@@ -15,7 +15,7 @@ Demo app (Next.js, Clerk, Supabase) with a Telos Brain schema in `brain/` with t
 
 | Environment | App | Brain |
 |---|---|---|
-| **Dev (local)** | `npm run dev` + local Supabase (Clerk optional) | Docker on your machine (`brain start`) |
+| **Dev (local)** | `npm run dev` + local Supabase (Clerk optional), or [Docker Compose](#optional-docker-compose) | Docker on your machine (`brain start`) |
 | **Preview / Production** | Vercel + hosted Supabase | [Telos Hosted](https://go.telosbrain.com) (`npm run brain:deploy` on the Vercel build) |
 
 Local Brain is self-hosted Docker and does not use Clerk. The host app can run locally without Clerk: `next dev` with placeholder Clerk keys signs you in as `local@localhost` in a seeded **Local** organisation. Clerk is required on Vercel / production.
@@ -32,7 +32,7 @@ npm install
 
 `npm install` runs the `prepare` script: it prints the [Prerequisites](#prerequisites) above, then `supabase start`, writes local Supabase keys into `.env`, installs the pinned `@telos.ready/brain` CLI globally, generates a shared tool API key (`TOOL_API_KEY` / `MY_APP_API_KEY`), runs `brain start`, copies the announced Brain execution key into `.env` and `brain/.env.local` as `BRAIN_API_KEY`, and runs `npm run db:push`. Docker Desktop and the [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started) must already be available.
 
-You can run the same flow later with `npm run prepare`. Skip it with `TEL_SKIP_PREPARE=1` (CI skips automatically). `npm run stack:reset` stops this repo's local Brain (and deletes its Docker SQL volume) and this project's Supabase. It does not stop other Compose stacks. Then `npm run prepare` to start clean.
+You can run the same flow later with `npm run prepare`. Skip it with `TEL_SKIP_PREPARE=1` (CI skips automatically). `npm run stack:reset` stops this repo's local Brain (and deletes its Docker SQL volume), this project's Supabase, and this repo's optional Compose app/init services. It does not stop other Compose stacks. Then `npm run prepare` (or `docker compose --profile stack up -d`) to start clean.
 
 Then fill `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`, and any remaining `MY_APP_*` values in `brain/.env.local`. Optionally set `OPENROUTER_API_KEY`, `AZURE_OPENAI_API_KEY` / `AZURE_OPENAI_ENDPOINT`, `OPENAI_API_KEY`, `XAI_API_KEY`, `LOCAL_LLM_1_BASE_URL`, or `DEFAULT_LLM_MODEL` (BRA210). Do not commit `.env` files.
 
@@ -156,8 +156,47 @@ You should now have three processes: Next.js `:3000`, Supabase (CLI ports), Brai
 ```bash
 brain status    # API URL, health, Compose project id
 # later:
-npm run stack:reset   # stop this repo's Brain (--reset) and Supabase
+npm run stack:reset   # stop this repo's Brain (--reset), Supabase, and Compose app
 ```
+
+## Optional: Docker Compose
+
+`npm run prepare` + `npm run dev` stays the default. Compose is an extra if you want Next.js in Docker (no host Node for the app) or a Docker-only first start. Requires Docker Compose v2.24+. Brain still starts with `brain start` (not a hand-written Brain+SQL service).
+
+**App only** — Supabase and Brain are already up (you ran `npm run prepare`):
+
+```bash
+docker compose up -d
+```
+
+**Stack (Docker only)** — init mounts the Docker socket, runs `scripts/prepare.mjs` (`supabase start`, `brain start`, keys, `db:push`), then starts the app. Host tools: Docker only. Init proxies published loopback ports (`54322`, `60061`, …) to `host.docker.internal` so those CLIs can health-check from inside the container.
+
+```bash
+# from the repo root (PWD must be the host project path)
+docker compose --profile stack up -d
+```
+
+Then fill `ANTHROPIC_API_KEY` / `VOYAGE_API_KEY` in `brain/.env.local` and deploy the schema (from the host if you have the Brain CLI, or via the init image):
+
+```bash
+docker compose --profile stack run --rm init ./scripts/compose-deploy.sh
+```
+
+That wrapper starts the same loopback proxies as init, then runs the package Brain CLI from this repo (`$PWD/brain`). Do not use `-w /app/brain` — init mounts `${PWD}:${PWD}`, and the image copy at `/app` has no `brain/.env.local`.
+
+Open [http://localhost:3000](http://localhost:3000). Brain admin: [http://127.0.0.1:60061](http://127.0.0.1:60061). The app container reaches Supabase and Brain on the host via `host.docker.internal`; the browser still uses published localhost ports (`:3000`, `:54321`, `:60061`).
+
+Bind-mounts the repo so `next dev` reloads. After `package.json` or lockfile changes, recreate the named `app_node_modules` volume — `docker compose build` alone does not refresh it (the volume overlays `/app/node_modules`):
+
+```bash
+docker compose --profile stack down -v
+docker compose build
+docker compose --profile stack up -d
+```
+
+`down -v` only removes this project's `app_node_modules`. Brain SQL is a different Compose project and is not affected.
+
+The stack-init image pins Supabase CLI / Docker CLI versions in the Dockerfile (`SUPABASE_CLI_VERSION`, `DOCKER_CLI_VERSION`, `DOCKER_COMPOSE_VERSION`). Those are independent of a host `brew` install. Give Docker Desktop at least 8 GB RAM — Next.js compile plus local Supabase can OOM the app container on a smaller VM.
 
 ## Stage and production (Vercel + Telos Hosted)
 
@@ -219,6 +258,7 @@ Do not commit `.env`, `brain/.env.local`, `brain/.env.stage`, `brain/.env.prod`,
 | Symptom | Likely cause |
 |---|---|
 | `npm install` tries to start Docker | `prepare` runs the local stack. Use `TEL_SKIP_PREPARE=1 npm install` in CI or if you only want dependencies |
+| Compose app cannot reach Supabase or Brain | Server-side URLs must use `host.docker.internal` (entrypoint rewrites `127.0.0.1` / `localhost`). Browser URLs stay on localhost published ports |
 | Chat: Brain is not configured | App `.env` missing `BRAIN_URL` or `BRAIN_API_KEY` |
 | `BRAIN_API_KEY was not announced` | Leftover local Brain Docker volume; the execution key is shown only once at create. `prepare` resets that volume when neither env file has a real key. Manual recovery: `npm run stack:reset`, then `npm run prepare` |
 | Tools never hit Next.js | `MY_APP_API_URL` used `localhost` instead of `http://host.docker.internal:3000` |
