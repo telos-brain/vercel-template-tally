@@ -1,0 +1,16 @@
+.git
+.github
+.next
+node_modules
+brain/.brain
+.env
+.env*.local
+coverage
+storybook-static
+.vercel
+*.md
+!README.md
+.DS_Store
+.vscode
+.cursor
+agent-transcripts

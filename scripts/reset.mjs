@@ -2,10 +2,12 @@
 /**
  * Tear down this repo's local Docker stack.
  *
- * Stops Brain with --reset (removes the SQL volume) and stops this project's
- * Supabase without a backup. Does not touch other Compose projects.
+ * Stops Brain with --reset (removes the SQL volume), this project's Supabase
+ * without a backup, and this repo's optional Compose app/init. Does not
+ * touch other Compose projects.
  *
  * After this, run `npm run prepare` (or `npm install`) to start clean.
+ * Optional Compose app/init: `docker compose --profile stack up -d`.
  */
 
 import { spawnSync } from "node:child_process";
@@ -23,11 +25,13 @@ function main() {
 
   const brain = stopBrain();
   const supabase = stopSupabase();
+  const compose = stopCompose();
 
-  printSummary(brain, supabase);
+  printSummary(brain, supabase, compose);
   console.log("Start again with: npm run prepare");
+  console.log("Or: docker compose --profile stack up -d");
 
-  if (brain.status === "failed" || supabase.status === "failed") {
+  if (brain.status === "failed" || supabase.status === "failed" || compose.status === "failed") {
     process.exit(1);
   }
 }
@@ -63,19 +67,35 @@ function stopSupabase() {
 }
 
 /**
+ * Stops this repo's optional app/init Compose project (TEL1276). Does not
+ * pass `-v` (named `app_node_modules` is kept). Brain SQL is a different
+ * Compose project and is still torn down by `brain stop --reset`.
+ *
+ * @returns {{ status: "stopped" | "already-stopped" | "skipped" | "failed", reason?: string }}
+ */
+function stopCompose() {
+  return runOptional("docker", ["compose", "--profile", "stack", "down", "--remove-orphans"], {
+    cwd: root,
+    successStatus: "stopped",
+  });
+}
+
+/**
  * @param {{ status: string, reason?: string }} brain
  * @param {{ status: string, reason?: string }} supabase
+ * @param {{ status: string, reason?: string }} compose
  */
-function printSummary(brain, supabase) {
+function printSummary(brain, supabase, compose) {
   const supabaseOk = supabase.status === "stopped" || supabase.status === "already-stopped";
+  const composeOk = compose.status === "stopped" || compose.status === "already-stopped" || compose.status === "skipped";
 
-  if (brain.status === "wiped" && supabaseOk) {
-    console.log("Done. Local Brain volume is gone and this project's Supabase is stopped.");
+  if (brain.status === "wiped" && supabaseOk && composeOk) {
+    console.log("Done. Local Brain volume is gone and this project's Supabase and Compose app are stopped.");
     return;
   }
 
-  if ((brain.status === "already-stopped" || brain.status === "wiped") && supabaseOk) {
-    console.log("Done. Brain and this project's Supabase are stopped (Brain volume was already gone).");
+  if ((brain.status === "already-stopped" || brain.status === "wiped") && supabaseOk && composeOk) {
+    console.log("Done. Brain, this project's Supabase, and the Compose app are stopped (Brain volume was already gone).");
     return;
   }
 
@@ -85,6 +105,9 @@ function printSummary(brain, supabase) {
   }
   if (supabase.status === "skipped" || supabase.status === "failed") {
     console.log(`  Supabase: ${supabase.reason ?? supabase.status}`);
+  }
+  if (compose.status === "skipped" || compose.status === "failed") {
+    console.log(`  Compose: ${compose.reason ?? compose.status}`);
   }
 }
 

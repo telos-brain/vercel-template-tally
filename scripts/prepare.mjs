@@ -4,6 +4,8 @@
  *
  * Runs on `npm install` (npm prepare lifecycle) and `npm run prepare`.
  * Skip with CI=1 or TEL_SKIP_PREPARE=1.
+ * TEL_COMPOSE=1 (Compose stack-profile init): skip global Brain CLI install
+ * and use node_modules/@telos.ready/brain.
  *
  * Prints README prerequisites, then starts Supabase and Brain, writes env
  * keys, and runs `npm run db:push`. After this finishes, fill
@@ -91,12 +93,22 @@ async function main() {
     note("npm install already in progress — skipping nested install");
   }
 
-  step("Installing @telos.ready/brain globally");
-  run("npm", ["install", "-g", pinnedBrainCliPackage()]);
-  requireOnPath(
-    "brain",
-    "Global Brain CLI was installed but is not on PATH. Open a new terminal and re-run npm run prepare.",
-  );
+  if (isComposeInit()) {
+    step("Using package Brain CLI (TEL_COMPOSE)");
+    if (!resolveBrainCli(root)) {
+      throw new Error(
+        "Brain CLI package not found in node_modules. Rebuild the image (`docker compose build`).",
+      );
+    }
+    note("Skipping global `npm install -g @telos.ready/brain` — using node_modules.");
+  } else {
+    step("Installing @telos.ready/brain globally");
+    run("npm", ["install", "-g", pinnedBrainCliPackage()]);
+    requireOnPath(
+      "brain",
+      "Global Brain CLI was installed but is not on PATH. Open a new terminal and re-run npm run prepare.",
+    );
+  }
 
   step("Generating shared tool API key");
   const toolApiKey = resolveToolApiKey();
@@ -192,9 +204,34 @@ function printDone(brainApiKey) {
 
   heading("Last step");
   note("Add those keys, then run:");
-  printCommand("brain", ["deploy", "--env", "local", "--instance", "local-brain"], { cwd: brainDir });
-  note("Then start the app:");
-  printCommand("npm", ["run", "dev"]);
+  if (isComposeInit()) {
+    printCommand(
+      "docker",
+      [
+        "compose",
+        "--profile",
+        "stack",
+        "run",
+        "--rm",
+        "-w",
+        "/app/brain",
+        "init",
+        "node",
+        "/app/node_modules/@telos.ready/brain/dist/index.js",
+        "deploy",
+        "--env",
+        "local",
+        "--instance",
+        "local-brain",
+      ],
+      { cwd: root },
+    );
+    note("The app container starts after this init job exits.");
+  } else {
+    printCommand("brain", ["deploy", "--env", "local", "--instance", "local-brain"], { cwd: brainDir });
+    note("Then start the app:");
+    printCommand("npm", ["run", "dev"]);
+  }
   const brainUrl =
     keepIfSet(readEnvValue(appEnvPath, "BRAIN_URL")) ?? "http://127.0.0.1:60061";
   hint("App:   http://localhost:3000");
@@ -213,6 +250,10 @@ function printDone(brainApiKey) {
     ok("App .env BRAIN_API_KEY and brain/.env.local BRAIN_API_KEY now match.");
   }
   console.log("");
+}
+
+function isComposeInit() {
+  return truthy(process.env.TEL_COMPOSE);
 }
 
 function getSkipReason() {
