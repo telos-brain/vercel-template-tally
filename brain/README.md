@@ -43,7 +43,7 @@ npm run brain:deploy
 # BRAIN_DEPLOY=0
 ```
 
-Hosted first deploy prints a **new** execution key in the build log — do not reuse the local key. Paste it into that environment’s `BRAIN_API_KEY` and redeploy.
+Hosted first deploy prints a **new** execution key in the build log — do not reuse the local key. Paste it into that environment’s `BRAIN_API_KEY` and redeploy, or add the [Telos Brain Vercel integration](https://vercel.com/integrations/telos-brain) and pick that brain (see the [root README](../README.md#telos-brain-vercel-integration)).
 
 ## Building the schema
 

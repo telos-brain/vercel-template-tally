@@ -163,7 +163,32 @@ npm run stack:reset   # stop this repo's Brain (--reset) and Supabase
 
 First-time walkthrough (real screens for Telos Hosted, GitHub import, and the Clerk / Supabase / Vercel sign-in pages): [docs/hosted-deploy.md](docs/hosted-deploy.md).
 
-Use local Docker Brain for **dev** only. For Preview and Production, Vercel deploys the Next.js app **and** the `brain/` schema together, the same way it applies Drizzle migrations. Sign up at [Telos Hosted](https://go.telosbrain.com) (includes $10 free credit) and mint an organisation API key.
+Use local Docker Brain for **dev** only. The Vercel integration cannot connect that local brain. For Preview and Production, Vercel deploys the Next.js app **and** the `brain/` schema together, the same way it applies Drizzle migrations. Sign up at [Telos Hosted](https://go.telosbrain.com) (includes $10 free credit) and mint an organisation API key.
+
+### Telos Brain Vercel integration
+
+The fastest way to put Execution API credentials on this Vercel project is the [Telos Brain integration](https://vercel.com/integrations/telos-brain). It only works with a **Telos Hosted** brain on [go.telosbrain.com](https://go.telosbrain.com). You cannot use it with a local Docker brain (`brain start`) — that stack has no Vercel installation, and the integration cannot write `localhost` / `127.0.0.1:60061` onto a hosted project. Keep local `.env` `BRAIN_URL` and `BRAIN_API_KEY` from `npm run prepare`.
+
+It writes:
+
+| Variable | Purpose |
+|---|---|
+| `TELOS_BRAIN_API_URL` | Execution API host (`https://go.telosbrain.com`) |
+| `BRAIN_API_KEY` | Per-brain bearer key |
+
+This app accepts `TELOS_BRAIN_API_URL` in place of `BRAIN_URL`. You do not need to copy the URL into a second variable.
+
+1. Create an organisation and a brain at [Telos Hosted](https://go.telosbrain.com) (or use one you already have). You must be an **Admin**.
+2. In Vercel, open [Telos Brain](https://vercel.com/integrations/telos-brain) → **Add Integration**.
+3. Pick your Vercel team and **this** project.
+4. Sign in to Telos, choose that brain, and finish. The popup writes the two variables onto Production, Preview, and Development.
+5. Still set the other hosted vars yourself (`TELOS_BRAIN_ORG_API_KEY`, `ANTHROPIC_API_KEY`, `TOOL_API_KEY`, Clerk, Supabase, `POSTGRES_URL`, `CRON_SECRET`, …). The integration does not replace those.
+6. Set `BRAIN_INSTANCE` to that brain’s **instance name** on go.telosbrain.com so `brain:deploy` updates the same brain (do not leave the default if you picked a different name).
+7. **Redeploy** the project. Env vars update immediately in the project; running deployments keep the old values until you redeploy.
+
+Do not paste a local Docker `BRAIN_API_KEY` into Vercel. If you skip the integration, you can still paste a hosted key by hand (see first deploy below).
+
+After a key rotate in Telos or Vercel, the integration keeps `BRAIN_API_KEY` in sync — redeploy again so this app picks it up.
 
 On Vercel, `npm run build` runs `db:migrate`, then `brain:deploy` (to [go.telosbrain.com](https://go.telosbrain.com)), then `next build`. Local `npm run build` is still `next build` only.
 
@@ -179,12 +204,12 @@ Set these on **Production** and **Preview** (different values, like `POSTGRES_UR
 | `OPENAI_API_KEY` / `XAI_API_KEY` | Optional. For `openai/…` or `xai/…` models |
 | `DEFAULT_LLM_MODEL` | Optional. e.g. `openrouter/auto` or `azure/gpt-4o-prod` — overrides workflow pins when the matching key exists |
 | `TOOL_API_KEY` | Shared tool handshake; copied to `MY_APP_API_KEY` on deploy |
-| `BRAIN_URL` | App-side Execution API: `https://go.telosbrain.com` |
-| `BRAIN_API_KEY` | Per-brain execution key (see first deploy below) |
+| `BRAIN_URL` | Optional if `TELOS_BRAIN_API_URL` is set. App-side Execution API: `https://go.telosbrain.com` |
+| `BRAIN_API_KEY` | Per-brain execution key. Written by the [Telos Brain integration](https://vercel.com/integrations/telos-brain), or paste from the first hosted deploy log |
 | `POSTGRES_URL` | Hosted Postgres (Drizzle migrate) |
 | `BRAIN_INSTANCE` | Optional. Default `{VERCEL_PROJECT_NAME}-prod` or `{VERCEL_PROJECT_NAME}-preview` |
 | `MY_APP_API_URL` | Optional override. Default: production URL, or the Preview deployment URL |
-| `TELOS_BRAIN_API_URL` | Optional. Default `https://go.telosbrain.com` |
+| `TELOS_BRAIN_API_URL` | Written by the [Telos Brain integration](https://vercel.com/integrations/telos-brain). Also used as the CLI deploy destination (default `https://go.telosbrain.com`) |
 | `BRAIN_CALLBACK_DOMAIN` | Optional extra hostname merged into `allowed-callback-domains` |
 | `BRAIN_DEPLOY` | Set to `0` to skip Brain deploy (app + Drizzle still deploy) |
 | `CRON_SECRET` | **Required on Preview and Production.** Authorises `GET /api/cron/daily-insights`. Vercel cron sends `Authorization: Bearer <CRON_SECRET>`. Without it the hosted job returns 401 and never starts Brain runs. Locally you can use `BRAIN_API_KEY` as the bearer token. Vercel Hobby does not execute `vercel.json` crons — use local curl or Brain UI Run. |
@@ -193,7 +218,7 @@ Also set Clerk, Supabase, and `NEXT_PUBLIC_SITE_URL` per environment. Keep `TOOL
 
 The deploy script copies `brain/.env.example` so declared key names exist, then Vercel env vars override placeholders. It also merges the current app hostname into `allowed-callback-domains` in an ephemeral compose file (Preview URLs change; no wildcards). Add a stable custom domain to `allowed-callback-domains` in `brain/brain-compose.yml` as well.
 
-**First hosted deploy:** the CLI prints a **new** execution API key in the Vercel build log (do not reuse the local key). Paste it into that environment’s `BRAIN_API_KEY`, then redeploy so it is uploaded for tool callbacks.
+**First hosted deploy** (if you did not use the integration): the CLI prints a **new** execution API key in the Vercel build log (do not reuse the local key). Paste it into that environment’s `BRAIN_API_KEY`, then redeploy so it is uploaded for tool callbacks. Prefer adding [Telos Brain](https://vercel.com/integrations/telos-brain) and picking that new brain instead of pasting the key by hand.
 
 To deploy the brain from a laptop with the same env vars:
 
@@ -219,7 +244,7 @@ Do not commit `.env`, `brain/.env.local`, `brain/.env.stage`, `brain/.env.prod`,
 | Symptom | Likely cause |
 |---|---|
 | `npm install` tries to start Docker | `prepare` runs the local stack. Use `TEL_SKIP_PREPARE=1 npm install` in CI or if you only want dependencies |
-| Chat: Brain is not configured | App `.env` missing `BRAIN_URL` or `BRAIN_API_KEY` |
+| Chat: Brain is not configured | Missing `BRAIN_API_KEY`, and neither `BRAIN_URL` nor `TELOS_BRAIN_API_URL`. Add the [Telos Brain integration](https://vercel.com/integrations/telos-brain) or set them by hand, then redeploy |
 | `BRAIN_API_KEY was not announced` | Leftover local Brain Docker volume; the execution key is shown only once at create. `prepare` resets that volume when neither env file has a real key. Manual recovery: `npm run stack:reset`, then `npm run prepare` |
 | Tools never hit Next.js | `MY_APP_API_URL` used `localhost` instead of `http://host.docker.internal:3000` |
 | Tool webhook 401 | If the body is `Protected deployment` / `vercel_auth_enabled`, Vercel Authentication is blocking Brain (see [docs/hosted-deploy.md](docs/hosted-deploy.md) Deployment Protection). If the body is `Invalid or missing tool API key`, `TOOL_API_KEY` ≠ `MY_APP_API_KEY` or Brain keys differ |

@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
 
   if (!isBrainConfigured()) {
     return jsonError(
-      "Telos Brain is not configured. Set BRAIN_URL and BRAIN_API_KEY.",
+      "Telos Brain is not configured. Set BRAIN_API_KEY and BRAIN_URL, or add the Telos Brain Vercel integration.",
       503
     );
   }

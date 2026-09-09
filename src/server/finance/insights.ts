@@ -47,12 +47,16 @@ export async function queueInsights(
   categories: InsightCategory[]
 ): Promise<Insight[]> {
   if (!isBrainConfigured()) {
-    throw new Error("Brain is not configured. Set BRAIN_URL and BRAIN_API_KEY.");
+    throw new Error(
+      "Brain is not configured. Set BRAIN_API_KEY and BRAIN_URL, or add the Telos Brain Vercel integration."
+    );
   }
 
   const entityId = await ensureBrainEntityForOrganisation(organisationId);
   if (!entityId) {
-    throw new Error("Brain is not configured. Set BRAIN_URL and BRAIN_API_KEY.");
+    throw new Error(
+      "Brain is not configured. Set BRAIN_API_KEY and BRAIN_URL, or add the Telos Brain Vercel integration."
+    );
   }
 
   const created: Insight[] = [];
@@ -264,7 +268,9 @@ export async function startDailyInsightRuns(): Promise<{
   failed: number;
 }> {
   if (!isBrainConfigured()) {
-    throw new Error("Brain is not configured. Set BRAIN_URL and BRAIN_API_KEY.");
+    throw new Error(
+      "Brain is not configured. Set BRAIN_API_KEY and BRAIN_URL, or add the Telos Brain Vercel integration."
+    );
   }
 
   const orgs = await db

@@ -2,8 +2,9 @@
  * Client for the Telos Brain Execution API.
  *
  * The Execution API is the runtime surface of a deployed Telos Brain. It is
- * addressed by the brain service host (`BRAIN_URL`) and authenticated with the
- * per-brain execution API key (`BRAIN_API_KEY`) presented as a bearer token.
+ * addressed by the brain service host (`BRAIN_URL` or `TELOS_BRAIN_API_URL`)
+ * and authenticated with the per-brain execution API key (`BRAIN_API_KEY`)
+ * presented as a bearer token.
  * The key resolves to a single active brain, which becomes the implicit tenant
  * scope for the request — no brain id is ever sent in the body or route.
  *
@@ -54,8 +55,13 @@ interface BrainErrorBody {
  * Returns true when both Brain Execution API env vars are set.
  * Used for fail-soft behaviour (e.g. local dev without a deployed brain).
  */
+function getBrainBaseUrl(): string | undefined {
+  const url = process.env.BRAIN_URL || process.env.TELOS_BRAIN_API_URL;
+  return url?.trim() || undefined;
+}
+
 export function isBrainConfigured(): boolean {
-  return Boolean(process.env.BRAIN_URL && process.env.BRAIN_API_KEY);
+  return Boolean(getBrainBaseUrl() && process.env.BRAIN_API_KEY);
 }
 
 /**
@@ -63,12 +69,12 @@ export function isBrainConfigured(): boolean {
  * environment. Throws when either variable is missing.
  */
 export function getBrainConfig(): BrainConfig {
-  const baseUrl = process.env.BRAIN_URL;
+  const baseUrl = getBrainBaseUrl();
   const apiKey = process.env.BRAIN_API_KEY;
 
   if (!baseUrl) {
     throw new Error(
-      "BRAIN_URL is not configured. Set it to the Telos Brain execution API base URL."
+      "BRAIN_URL is not configured. Set BRAIN_URL or add the Telos Brain Vercel integration (writes TELOS_BRAIN_API_URL)."
     );
   }
   if (!apiKey) {
