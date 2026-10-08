@@ -105,7 +105,7 @@ MY_APP_API_URL=http://host.docker.internal:3000
 # DEFAULT_LLM_MODEL=local_1/qwen3:8b
 ```
 
-Workflows pin Anthropic so a brain with only `ANTHROPIC_API_KEY` still runs. A reachable brain default (`DEFAULT_LLM_MODEL`, Settings **Default LLM model**, or compose `llm-model`) overrides those pins. After changing models or local-runner URLs, redeploy. From Brain-in-Docker, Ollama on the host must use `host.docker.internal`, not `localhost`. Voyage is still needed for semantic search — a local LLM does not replace it. Deploy succeeds without `VOYAGE_API_KEY`; embeddings are skipped.
+Workflows pin Anthropic so a brain with only `ANTHROPIC_API_KEY` still runs. A reachable brain default (`DEFAULT_LLM_MODEL`, Settings **Default LLM model**, or compose `llm-model`) overrides those pins. On Telos Hosted you can set compose `llm-model: telosbrain/xai/grok-4.6` (no provider key; billed at 2× the official xAI grok-4.6 rate on organisation brain credit — BRA210 / BRA301). TALLY leaves that commented. It is unavailable on local Docker. After changing models or local-runner URLs, redeploy. From Brain-in-Docker, Ollama on the host must use `host.docker.internal`, not `localhost`. Voyage is still needed for semantic search — a local LLM does not replace it. Deploy succeeds without `VOYAGE_API_KEY`; embeddings are skipped.
 
 Leave the `TELOS_*` values that `brain start` wrote — they are the well-known local org key and `http://127.0.0.1:60061`. `TELOS_*` is CLI config only; it is never uploaded to the brain.
 

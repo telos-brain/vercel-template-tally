@@ -1,9 +1,10 @@
 ---
 name: LLM Providers and Models
 code: BRA210
-version: 15
+version: 18
 description: Supported AI providers for workflow runs, the provider/model string
-  format, example model codes, credential variable names, OpenRouter, Azure
+  format, example model codes, credential variable names, the Telos Brain
+  platform Grok aggregator (telosbrain/xai/grok-4.6), OpenRouter, Azure
   OpenAI, local OpenAI-compatible runners (Ollama / llama.cpp), and which LLM
   execution settings apply per provider.
 ---
@@ -36,13 +37,14 @@ model: provider/model-name
 | `anthropic/claude-sonnet-4-6` | Uses the Anthropic conversant and `ANTHROPIC_API_KEY` |
 | `openai/gpt-4o` | Uses the OpenAI conversant and `OPENAI_API_KEY` |
 | `xai/grok-4.5` | Uses the xAI (Grok) conversant and `XAI_API_KEY` |
+| `telosbrain/xai/grok-4.6` | Telos-hosted Grok. No brain `XAI_API_KEY`. Billed to organisation brain credit at **2×** the official xAI grok-4.6 API rate (**BRA212**) |
 | `openrouter/anthropic/claude-sonnet-4.6` | Uses OpenRouter (`OPENROUTER_API_KEY`). Remainder is the OpenRouter model id |
 | `openrouter/auto` | OpenRouter Auto Router — OpenRouter picks a model per turn |
 | `azure/gpt-4o-prod` | Uses Azure OpenAI (`AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_ENDPOINT`). Remainder is the **deployment name** |
 | `local_1/qwen3:8b` | Uses runner 1 (`LOCAL_LLM_1_BASE_URL`). Remainder is the runner's model id |
 | `local_2/gemma4:e4b` | Uses runner 2 (`LOCAL_LLM_2_BASE_URL`) |
 | `claude-sonnet-4-6` (no prefix) | Treated as **anthropic** (default provider for unprefixed names) |
-| omitted / null | Brain default (`llm-model` / `DEFAULT_LLM_MODEL` / Settings) when set and reachable; otherwise the run **fails**. Leftover cloud keys are not used as a silent default. |
+| omitted / null | Brain default (`llm-model` / `DEFAULT_LLM_MODEL` / Settings) when set and reachable; otherwise the run **fails**. A set `model:` overrides that default. Leftover cloud keys are not used as a silent default. |
 
 Both `/` and `\` are accepted as the separator. The provider prefix is
 case-insensitive (`OpenAI/gpt-4o` → `openai`). The alias `claude/…` folds to
@@ -60,18 +62,22 @@ variable is missing, the resolver tries the next candidate in the chain below.
    fails the run — no silent fallback. Older clients may send
    `settingsOverride.model` instead; the dedicated field wins when both are
    present.
-2. Brain default: Settings, compose `llm-model`, or `DEFAULT_LLM_MODEL`, if set
-   and the matching env var exists. Compose `llm-model` wins over the env key
-   at deploy time. A missing credential falls through to the workflow model.
-3. Workflow frontmatter `model:`.
-4. **Fail** — there is no silent Anthropic/OpenAI/OpenRouter/Azure platform default. A leftover
+2. Workflow frontmatter `model:`, if set and the matching credential exists.
+   This overrides the brain default. A missing credential falls through to
+   the brain default.
+3. Brain default: Settings, compose `llm-model`, or `DEFAULT_LLM_MODEL`, if set
+   and the matching credential exists. Used when the workflow omits `model:`,
+   or when that model's credential is missing. Compose `llm-model` wins over
+   the env key at deploy time.
+4. **Fail** — there is no silent Anthropic/OpenAI/OpenRouter/Azure/Telos Brain platform default. A leftover
    `ANTHROPIC_API_KEY` (or OpenAI / xAI / OpenRouter / Azure key) is not used just because it is
    present; overnight / heartbeat runs must not spend cloud tokens by accident.
+   `telosbrain/…` never reads a brain env var — only the platform `Grok:ApiKey`.
 
 If none of those candidates have a credential, the run does not start and the
 error lists what was tried (or explains that no model is configured). Set a
-brain default when you want every workflow to use a local runner without editing
-each YAML file. Deploy warns (does not 409) when executable workflows have no
+brain default for workflows that omit `model:`. A workflow that sets `model:`
+uses that model instead. Deploy warns (does not 409) when executable workflows have no
 `model:` and no default is set. SYSTEM workflows are skipped for that warning.
 
 ---
@@ -82,7 +88,8 @@ each YAML file. Deploy warns (does not 409) when executable workflows have no
 | --------------- | ---------- | ------------------- | ----- |
 | `anthropic` (alias `claude`) | Claude | `ANTHROPIC_API_KEY` | Default provider for **unprefixed** model names |
 | `openai` | OpenAI Chat Completions | `OPENAI_API_KEY` | Also used for OpenAI embedding models when configured |
-| `xai` | OpenAI-compatible Chat Completions at `api.x.ai` | `XAI_API_KEY` | Grok models; response `reasoning_content` mapped to Thinking |
+| `xai` | OpenAI-compatible Chat Completions at `api.x.ai` | `XAI_API_KEY` | Bring-your-own Grok. Token cost uses organisation `LlmPrices` for `xai` / the wire model; the customer's xAI invoice is separate. |
+| `telosbrain` | Same Grok conversant as `xai`, with a **platform-held** key (`Grok:ApiKey`) | None on the brain | First-party aggregator. Remainder after the first `/` must be an xAI model (`xai/grok-4.6`). Unavailable in local development — use `xai/grok-4.6` with `XAI_API_KEY` instead. Token cost and brain-credit debit use `LlmPrices` keyed `provider=telosbrain`, `model=xai/grok-4.6` at **double** the official xAI grok-4.6 short-context list price. See **BRA212**. |
 | `openrouter` | OpenAI-compatible Chat Completions at `openrouter.ai/api` | `OPENROUTER_API_KEY` | Aggregator. Remainder after the first `/` is the OpenRouter model id (`anthropic/claude-sonnet-4.6`, `openai/gpt-4o`, …). Settings lists a capped catalogue from `/v1/models` when the key is present. |
 | `azure` | Azure OpenAI Chat Completions | `AZURE_OPENAI_API_KEY` and `AZURE_OPENAI_ENDPOINT` (optional `AZURE_OPENAI_API_VERSION`) | The remainder after the first `/` is the Azure **deployment name**, not the underlying model name. V1 is API key auth only (Managed Identity deferred). Do not seed `LlmPrices` — Azure bills the customer's Azure subscription; `CostCents` is null (UI `—`). Platform credits still apply via `RunSeconds`. See §3a. |
 | `local_N` (e.g. `local_1`) | Local OpenAI-compatible | `LOCAL_LLM_N_BASE_URL` (required), `LOCAL_LLM_N_API_KEY` (optional) | Ollama, llama.cpp, or any OpenAI-compatible local server. See §3. |
@@ -177,6 +184,8 @@ use a model id your API key can call. Prefer an explicit `provider/` prefix.
 
 | `model` value | Typical use |
 | ------------- | ----------- |
+| `telosbrain/xai/grok-4.6` | **Telos-hosted Grok 4.6.** No brain API key. Billed to brain credit at 2× the official xAI grok-4.6 API rate. Preferred on Telos Cloud when you do not want to supply `XAI_API_KEY`. |
+| `xai/grok-4.6` | Same Grok 4.6 on **your** xAI key (`XAI_API_KEY`). You pay xAI at list; Telos does not mark this up. |
 | `xai/grok-4.5` | Flagship Grok coding / agentic |
 | `xai/grok-4.3` | Lower-cost long-context Grok |
 | `xai/grok-build-0.1` | Coding-focused early access |
@@ -251,7 +260,10 @@ model: anthropic/claude-sonnet-4-6
 # OpenAI
 model: openai/gpt-4o
 
-# Grok
+# Telos-hosted Grok (brain credit, 2× xAI list)
+model: telosbrain/xai/grok-4.6
+
+# Grok on your own xAI key
 model: xai/grok-4.5
 
 # OpenRouter (remainder is the OpenRouter model id)
@@ -277,40 +289,65 @@ model: claude-haiku-4-5
 ## 6. LLM settings by provider
 
 Optional LLM execution fields on the workflow (`max-turns`, `output-tokens`,
-`caching`, `thinking`, …) are documented in **BRA201** §8.1.
+`caching`, `thinking`, …) are documented in **BRA217**.
 
-| Setting | Anthropic | OpenAI | xAI | OpenRouter | Azure | Local |
-| ------- | --------- | ------ | --- | ---------- | ----- | ----- |
-| `max-turns` | Applied | Applied | Applied | Applied | Applied | Applied |
-| `output-tokens` (retry caps) | Applied (`max_tokens` / `max_tokens` stop) | Applied (`max_tokens` / `finish_reason=length`) | Applied (same as OpenAI) | Applied (same as OpenAI) | Applied (same as OpenAI) | Applied (same as OpenAI) |
-| `caching` | Applied | Ignored | Applied | Ignored | Ignored | Ignored |
-| `thinking` / `thinking-budget` / `thinking-effort` | Applied | Ignored (request) | Ignored (request) | Ignored (request) | Ignored (request) | Ignored (request) |
-| `auto-compaction` | Applied (server-side) | Applied (client-side via COMPACTION workflow) | Applied (client-side via COMPACTION workflow) | Applied (client-side via COMPACTION workflow) | Applied (client-side via COMPACTION workflow) | Applied (client-side via COMPACTION workflow) |
+| Setting | Anthropic | OpenAI | xAI | Telos Brain | OpenRouter | Azure | Local |
+| ------- | --------- | ------ | --- | ----------- | ---------- | ----- | ----- |
+| `max-turns` | Applied | Applied | Applied | Applied (same as xAI) | Applied | Applied | Applied |
+| `output-tokens` (retry caps) | Applied (`max_tokens` / `max_tokens` stop) | Applied (`max_tokens` / `finish_reason=length`) | Applied (same as OpenAI) | Applied (same as xAI) | Applied (same as OpenAI) | Applied (same as OpenAI) | Applied (same as OpenAI) |
+| `caching` | Applied | Ignored | Applied | Applied (same as xAI) | Ignored | Ignored | Ignored |
+| `thinking` / `thinking-effort` | Applied | Applied (`reasoning_effort`) | Applied (`reasoning_effort`) | Applied (same as xAI) | Applied (`reasoning`) | Applied (`reasoning_effort`) | Applied (`reasoning_effort`) |
+| `thinking-budget` | Applied | Ignored (no token budget) | Ignored (no Grok equivalent) | Ignored (same as xAI) | Applied for `extended` (`reasoning.max_tokens`) | Ignored (no token budget) | Ignored (no token budget) |
+| `auto-compaction` | Applied (server-side) | Applied (client-side via COMPACTION workflow) | Applied (client-side via COMPACTION workflow) | Applied (client-side via COMPACTION workflow) | Applied (client-side via COMPACTION workflow) | Applied (client-side via COMPACTION workflow) | Applied (client-side via COMPACTION workflow) |
 
 Unsupported fields are accepted on deploy and silently ignored at run time where
 the table shows Ignored — they do not fail the run. Each provider applies
 supported settings in its own native form (e.g. `caching: automatic` uses that
 provider's automatic prompt-cache mechanism).
 
+**Request-side reasoning:** Unset `thinking` omits the provider field, so each
+model keeps its own default. On Grok that default is `high` (`grok-4.5` and
+later). Grok cannot disable reasoning and has no `max`.
+
+| Workflow | xAI / Telos Brain `reasoning_effort` | OpenAI / Azure `reasoning_effort` | OpenRouter `reasoning` | Local `reasoning_effort` |
+| -------- | ------------------------------------ | --------------------------------- | ---------------------- | ------------------------ |
+| omitted | omitted (API default, `high` on current Grok) | omitted | omitted | omitted |
+| `thinking: none` | omitted (Grok has no `none`) | `none` | `effort: none` | `none` |
+| `adaptive` with no effort | `high` | `high` | `effort: high` | `high` |
+| `adaptive` or `effort` plus `thinking-effort` | `low` / `medium` / `high` / `xhigh`; `max` → `xhigh`. `effort` with no level is `low` | same values, including `max` | `effort` with the same values, including `max` | `low` / `medium` / `high`; `xhigh` and `max` → `high` |
+| `extended` | `high` | `high` | `max_tokens` from `thinking-budget`, or `effort: high` when the budget is omitted | `high` |
+
+`thinking-budget` is sent only on OpenRouter `extended` (`reasoning.max_tokens`).
+Grok, OpenAI, Azure, and local have no thinking token budget.
+
 **Response-side reasoning (xAI / OpenAI-compatible):** Grok reasoning models often
 return chain-of-thought in `message.reasoning_content` (especially on tool-call
 turns where `content` is empty). That text is stored on the run so the UI can
-show it alongside tool cards. Workflow `thinking*` frontmatter still does not
-send Anthropic-style thinking request parameters to OpenAI / xAI / OpenRouter.
+show it, and it is sent back unchanged on later requests in the same run.
+Omitting it misses the prompt cache ([What Breaks Caching](https://docs.x.ai/developers/advanced-api-usage/prompt-caching/multi-turn)).
+
+**Grok prompt cache key.** xAI caches automatically. Chat Completions has no
+`prompt_cache_key` body field; the equivalent is the `x-grok-conv-id` header,
+set to the workflow run id on every Grok call unless `caching: none`. That
+pins the run to one server so later turns (tool steps and chat continuations)
+can reuse the prefix. Continuations replay the previous messages, including
+tool results and `reasoning_content`, and only append the new user message.
+`caching: automatic` is still what turns on Claude's automatic cache breakpoint;
+on xAI it is not required for the header.
 
 ---
 
 ## 7. Native tools
 
 Provider-native tools such as `web_search` and `web_fetch` are Anthropic-shaped
-today. On OpenAI / xAI / OpenRouter / Azure / local-runner runs they are skipped rather than sent as
+today. On OpenAI / xAI / Telos Brain / OpenRouter / Azure / local-runner runs they are skipped rather than sent as
 unknown capabilities. Declared and system tools still work on every provider.
 
 ---
 
 ## 8. Related skills
 
-- **BRA201** §8 — workflow frontmatter, including LLM execution settings
+- **BRA217** — workflow frontmatter, including LLM execution settings
 - **BRA202** — `.env` upload, cloud LLM keys, `DEFAULT_LLM_MODEL`, and `LOCAL_LLM_N_BASE_URL`
 - **BRA106** §8 — local Docker stack: Ollama env vars and `host.docker.internal`
 - **BRA212** — managing LLM costs (caching, cheaper models, budgets, spend limits)

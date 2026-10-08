@@ -1,12 +1,12 @@
 ---
 name: Compact Context
 code: WF-COMPACT
-version: 2
-type: COMPACTION
-description: Summarises older conversation turns so a run can continue within the context window.
+version: 3
 # Fallback when no brain default is set. Settings / DEFAULT_LLM_MODEL /
 # compose llm-model wins when that credential exists (BRA210).
 model: anthropic/claude-haiku-4-5
+type: COMPACTION
+description: Summarises older conversation turns so a run can continue within the context window.
 
 # No tools — this workflow only reads the transcript passed as the user message
 # and returns a plain-text summary as its final reply.

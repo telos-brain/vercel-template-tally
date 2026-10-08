@@ -1,7 +1,7 @@
 ---
 name: "Execution API: Inbox Entries & Tasks"
 code: BRA404
-version: 8
+version: 12
 description: How to create, list, read and update inbox entries and their tasks
   via the Execution API — the learning-signal intake surface. Covers the entry and
   task lifecycles, inbox trigger matching (entry create vs task auto-run), learning
@@ -42,7 +42,7 @@ injected into the input message. Authors must pull it in with template tags
 
 | Scope | Use |
 | --- | --- |
-| `{{inboxEntry.*}}` | Entry scalars: `reference`, `date`, `source`, `title`, `body`, `status`, `routingType` |
+| `{{inboxEntry.*}}` | Entry scalars: `reference`, `date`, `source`, `title`, `body`, `status`, `routingType`, `workflowName`, `entityName`, `unitOfWorkName`, `weight`, `clusterReference`. `body` is prepended with the source-context and cluster fields. |
 | `{{task.*}}` | Triggering task scalars: `reference`, `action`, `response`, `status`, `workflowCode`, `expertOpinion` |
 | `{{#inboxTasks}}...{{/inboxTasks}}` | Sibling tasks: `reference`, `action`, `response`, `status`, `workflowCode`, `expertOpinion` |
 
@@ -55,24 +55,30 @@ example workflow: `WF-INBOX-ENTRY-CONTEXT`.
 
 ## Inbox triggers (two stages)
 
-Triggers live on **workflows** (`trigger:` in frontmatter — see BRA201 §8), not
+Triggers live on **workflows** (`trigger:` in frontmatter — see BRA217), not
 on the task row. Inbox work uses them in two distinct stages:
 
 | Stage | When | What is matched | Outcome |
 | --- | --- | --- | --- |
-| **Entry create** | `POST /inbox` / `create_inbox_entry` with status `PENDING` | Each `TRIGGERED` workflow's `inbox:…` pattern against the **entry's `routingType`** and the brain's **`learning-mode`** | Matching workflows each get a new `InboxTask` (`PENDING`, linked to that workflow) |
-| **Task auto-run** | A `PENDING` task that has a linked workflow is picked up | That **task's linked workflow** only — does it have an inbox trigger whose learning-mode qualifier is satisfied? | Yes → `PENDING → RUNNING` and the workflow runs. No → `PENDING → AWAITING_APPROVAL` |
+| **Entry create** | `POST /inbox` / `create_inbox_entry` with status `PENDING` | Each `TRIGGERED` workflow's `inbox:…` pattern against the **entry's `routingType`**, the brain's **`learning-mode`**, and the entry's **`weight`** | Matching workflows each get a new `InboxTask` (`PENDING`, linked to that workflow) |
+| **Task auto-run** | A `PENDING` task that has a linked workflow is picked up | That **task's linked workflow** only — does it have an inbox trigger whose learning-mode qualifier, optional weight threshold, and optional fifth-segment routing code are satisfied (weight / routing are the parent entry's **current** values)? | Yes → `PENDING → RUNNING` and the workflow runs. No → `PENDING → AWAITING_APPROVAL` |
 
 ### Stage 1 — which tasks get created
 
 Pattern shape: `inbox:<RoutingType>` or `inbox:*`, optionally with a learning-mode
-qualifier:
+qualifier, an optional weight threshold, and an optional routing-code filter:
 
 ```text
+inbox:<RoutingType>[:<learning-mode>[:<weight-threshold>[:<routing-code>]]]
+
 inbox:SKILL_UPDATE
 inbox:*
 inbox:SKILL_UPDATE:low
 inbox:WORKFLOW_UPDATE:medium
+inbox:SKILL_UPDATE:high:10
+inbox:*:medium:3
+inbox:*:high:10
+inbox:*:high:10:SKILL_UPDATE
 ```
 
 - `inbox:*` matches any routing type (including null).
@@ -83,6 +89,22 @@ inbox:WORKFLOW_UPDATE:medium
   when the brain's `learning-mode` **meets or exceeds** the qualifier.
   Unqualified inbox triggers always pass the learning-mode check (including when
   the brain mode is omitted / off).
+- Optional fourth segment is a positive integer **weight threshold** (BRA333).
+  The trigger fires only when the entry's `Weight` **meets or exceeds** that
+  value. Absent fourth segment defaults to no weight gate (always fires,
+  regardless of weight). The fourth segment is only valid when the third
+  (learning-mode) segment is also present.
+- Optional fifth segment is a **routing-code** filter. When omitted (or `*`),
+  the trigger matches every routing type (subject to the second-segment
+  pattern). When present, the entry's `routingType` must match that code
+  exactly. The fifth segment is only valid when the fourth (weight) segment
+  is also present.
+- Routing type, learning-mode qualifier, weight threshold, and routing-code
+  filter are AND-gated: all present gates must pass.
+- Weight is evaluated **once**, at entry creation (when the PENDING entry is
+  created). Post-creation clustering that raises a source entry's weight does
+  **not** re-fire that entry's triggers. A new cluster entry is itself created
+  and evaluated at *its* creation time, with the summed cluster weight.
 - Creating an entry as `PROCESSED` skips this stage entirely (no tasks).
 
 ### Stage 2 — whether a PENDING task auto-runs
@@ -92,19 +114,25 @@ Once a task exists, **the workflow already linked on that task is authoritative*
 entry's routing type.
 
 - Auto-run when the linked workflow has **at least one** `inbox:…` trigger whose
-  learning-mode qualifier is satisfied (routing segment ignored at this stage).
+  learning-mode qualifier, optional weight threshold, and optional
+  fifth-segment routing code are satisfied (second-segment routing pattern
+  ignored at this stage). Weight and routing code use the parent entry's
+  **current** values, so a later vote or a cluster-then-`add_inbox_task` can
+  unlock auto-run after the entry was created.
 - Otherwise the task moves to `AWAITING_APPROVAL` for human sign-off (admin UI,
   `PATCH` approve, or `update_inbox_task` — see below / BRA405).
 - A task with **no** linked workflow cannot auto-run; it parks at
   `AWAITING_APPROVAL`.
 - Workflow `trigger-mode` (`manual` / `automatic`) does **not** control inbox
-  task approval. That field is for eval-style triggers such as
-  `workflowrun:complete` (BRA207).
+  task approval. Eval identity is `type: EVAL`; automatic enqueue is a
+  learning-mode qualifier on `workflowrun:complete` (**BRA207**).
 
 **Authoring tip:** a triage flow that calls `add_inbox_task` with
 `workflow_code: WF-SKILL-UPDATE` only auto-runs if `WF-SKILL-UPDATE` itself declares
-an inbox trigger (and learning mode allows). Omit the inbox trigger (or use a
-qualifier above the brain's mode) to keep a human in the loop.
+an inbox trigger whose learning-mode and weight gates pass. Omit the inbox
+trigger (or use a qualifier / weight threshold the entry does not meet) to
+keep a human in the loop. Apply-learning workflows that should only run on a
+well-evidenced signal use `inbox:*:high:10`.
 
 ---
 
@@ -121,7 +149,7 @@ or `REVIEWING`, `APPLIED` only from `REVIEWING`).
 **Inbox task** — all new tasks start `PENDING`. Then either:
 
 - `PENDING → RUNNING → COMPLETED | FAILED` when the linked workflow has a
-  qualifying inbox trigger (auto-run), or
+  qualifying inbox trigger (auto-run: learning-mode + optional weight), or
 - `PENDING → AWAITING_APPROVAL → RUNNING → COMPLETED | FAILED` when it does not
   (human approval required),
 
@@ -135,10 +163,11 @@ or `→ CANCELLED` from any non-terminal state.
 
 Creating an entry **also runs stage-1 inbox trigger matching in the same atomic
 write**: every `TRIGGERED` workflow whose `inbox:…` pattern matches the entry's
-`routingType` (and learning-mode qualifier) gets a `PENDING` `InboxTask` linked
-to that workflow. The response therefore includes any tasks generated for the
-entry. Whether those tasks auto-run is decided later (stage 2) from each task's
-linked workflow — see [Inbox triggers](#inbox-triggers-two-stages).
+`routingType`, learning-mode qualifier, and weight threshold gets a `PENDING`
+`InboxTask` linked to that workflow. The response therefore includes any tasks
+generated for the entry. Whether those tasks auto-run is decided later (stage 2)
+from each task's linked workflow (learning mode + the entry's current weight) —
+see [Inbox triggers](#inbox-triggers-two-stages).
 
 ```json
 {
@@ -167,7 +196,7 @@ GET /inbox?status=PENDING&created_since=2026-07-01T00:00:00Z
 
 | Query param | Notes |
 |---|---|
-| `status` | Optional. Filters to one entry status. |
+| `status` | Optional. Filters to one entry status. Omitted: open, unclustered entries only (`PENDING` / `PROCESSED`, `ClusterId` null). |
 | `created_since` | Optional ISO 8601 lower bound (`CreatedAt >= created_since`), for polling since a last poll. |
 
 Response `200 OK` — a summary array (most recent source event first). The `body`
@@ -276,7 +305,7 @@ fields are supplied.
 
 ## See also
 
-- **BRA201** §8 — workflow `trigger` / `learning-mode` authoring
+- **BRA217** — workflow `trigger` / `learning-mode` authoring
 - **BRA405** — inbox system tools (`create_inbox_entry`, `add_inbox_task`, …)
-- **BRA207** — learning-eval workflows (`trigger-mode` for `workflowrun:complete`)
+- **BRA207** — learning-eval workflows (`workflowrun:complete` triggers)
 - **BRA204** — `{{inboxEntry.*}}` / `{{task.*}}` / `{{#inboxTasks}}` template tags

@@ -5,12 +5,12 @@ description: >-
   On unit-of-work completion, detects domain concepts that fit blueprint
   categories and creates a PROCESSED inbox entry with one review_blueprint task
   per learning. Does not grade agent quality (see WF-EVAL-RUN).
-version: 1
-type: TRIGGERED
-trigger: unitofwork:complete:low
+version: 2
 # Fallback when no brain default is set. Settings / DEFAULT_LLM_MODEL /
 # compose llm-model wins when that credential exists (BRA210).
 model: anthropic/claude-sonnet-4-6
+type: TRIGGERED
+trigger: unitofwork:complete:low
 system-prompt-code: WF-SYSTEM-PROMPT
 
 output-tokens: 4096, 8192

@@ -1,7 +1,8 @@
 name: Starter Brain
 description: >-
   A clean starter brain schema with the Telos Brain skillbook, execution tools
-  (skills, memory, Q&A) and management tools (schema maintenance).
+  (skills, memory, Q&A, inbox, organisation, unit of work, brain schema) and
+  management tools (schema list/read/edit).
 
 # Embedding model for semantic search (find_available_skills, blueprint search).
 # The API key comes from this brain's own .env (VOYAGE_API_KEY for voyage-*).
@@ -9,6 +10,7 @@ embedding-model: voyage-3-lite
 
 # Learning loop intensity. high enables auto-run of inbox workflows whose
 # triggers declare a :high (or lower) learning-mode qualifier (BRA122 / BRA404).
+# Apply workflows also require inbox weight 5 (`inbox:…:high:5`).
 learning-mode: high
 
 # Optional default LLM (provider/model). When set and the matching credential
@@ -22,6 +24,8 @@ learning-mode: high
 # Compose llm-model wins over DEFAULT_LLM_MODEL at deploy time, so leave this
 # commented if you want Settings / .env to be the switch.
 # llm-model: anthropic/claude-sonnet-4-6
+# Telos Cloud only (2× xAI list on brain credit). Unavailable on local Docker.
+# llm-model: telosbrain/xai/grok-4.6
 # llm-model: openrouter/anthropic/claude-sonnet-4.6
 # llm-model: openrouter/auto
 # llm-model: azure/gpt-4o-prod
@@ -68,13 +72,18 @@ connectors:
   - connectors/my-app.yml
 
 # Tools are split into execution (runtime) and management (brain maintenance).
+# Unlisted tool-group manifests are not deployed. Tool names must be unique
+# across groups.
 tools:
   - tools/execution/skills/tools.yml
   - tools/execution/memory/tools.yml
   - tools/execution/qa/tools.yml
   - tools/execution/native/tools.yml
   - tools/execution/inbox/tools.yml
+  - tools/execution/organisation/tools.yml
+  - tools/execution/uow/tools.yml
   - tools/execution/simulation/tools.yml
+  - tools/execution/brain-schema/tools.yml
   - tools/execution/my-app/tools.yml
   - tools/execution/finance/tools.yml
   - tools/management/schema/tools.yml

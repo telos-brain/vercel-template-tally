@@ -15,7 +15,7 @@ Accounts and keys you will need:
 - [Clerk](https://dashboard.clerk.com) (required on Vercel / production)
 - [Supabase](https://supabase.com/dashboard) (hosted project, not local `supabase start`)
 - [Vercel](https://vercel.com)
-- Anthropic API key (workflows pin Anthropic). Voyage is optional at deploy (`voyage-3-lite`; embeddings skipped if unset). Optional: OpenRouter (`openrouter/auto`), Azure OpenAI, OpenAI / xAI keys, and `DEFAULT_LLM_MODEL` (BRA210)
+- Anthropic API key (workflows pin Anthropic). Voyage is optional at deploy (`voyage-3-lite`; embeddings skipped if unset). Optional: OpenRouter (`openrouter/auto`), Azure OpenAI, OpenAI / xAI keys, `DEFAULT_LLM_MODEL`, or compose `llm-model: telosbrain/xai/grok-4.6` on Telos Hosted (2× xAI list on brain credit; TALLY does not enable this by default) (BRA210 / BRA301)
 
 A random shared tool secret (`TOOL_API_KEY` / `MY_APP_API_KEY`) — generate a new one for hosted; do not reuse a value you are not sure about.
 

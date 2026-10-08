@@ -1,11 +1,13 @@
 ---
 name: "Execution API: File Transcription"
 code: BRA410
-version: 2
+version: 4
 description: How to extract text from uploaded files via the Execution API
   POST /transcription endpoint — supported types, request shape, response
-  envelope, error conditions, and how image transcription resolves its vision
-  model from Brain settings and environment secrets.
+  envelope, error conditions, PDF page-OCR fallback when text extraction
+  fails, and how image transcription resolves its vision model from Brain
+  settings and environment secrets. For in-brain URL transcription with an
+  optional prompt, see BRA412 (`transcribe_image`).
 ---
 
 # Execution API: File Transcription
@@ -68,7 +70,7 @@ Content-Type: application/pdf
 | Extension | Extraction path |
 |---|---|
 | `.png`, `.jpg`, `.jpeg`, `.webp` | Vision model (Claude or OpenAI) — see [Image model resolution](#image-model-resolution) |
-| `.pdf` | Server-side (PdfPig) — no AI call |
+| `.pdf` | Server-side (PdfPig) first. If extraction fails or returns no text (typical of scanned / image-only PDFs), each page is rendered and sent through the same vision OCR path as images. |
 | `.docx` | Server-side (DocumentFormat.OpenXml) — no AI call |
 | `.xlsx` | Server-side (ClosedXML) — rows as tab-separated text |
 | `.csv`, `.md`, `.markdown` | Plain `StreamReader` — no AI call |
@@ -82,13 +84,31 @@ Any other extension returns `400` with an unsupported-type error.
 For image uploads the service resolves a vision provider in this order:
 
 1. **Brain `transcriptionModel`** (set in Brain Settings or via
-   `transcription-model` in `brain-compose.yml` — see **BRA201**) when a
+   `transcription-model` in `brain-compose.yml` — see **BRA213**) when a
    matching provider API key is available
 2. Else **`ANTHROPIC_API_KEY`** → default Claude vision model
 3. Else **`OPENAI_API_KEY`** → default OpenAI vision model
 4. Else **`400`** — no transcription model available
 
-Document types never require an AI key.
+DOCX / XLSX / CSV / Markdown never require an AI key. PDF text extraction also
+does not. **PDF OCR fallback** (scanned or image-only PDFs) uses the same vision
+resolution as image uploads and therefore needs a usable key.
+
+### PDF OCR fallback
+
+When PdfPig throws or returns only whitespace, the service renders each page to
+a PNG and transcribes it independently. The combined `result` is:
+
+```
+--- Page 1 ---
+text from page 1
+
+--- Page 2 ---
+text from page 2
+```
+
+A page that yields no text still keeps its heading so later pages stay numbered.
+If every page is empty, the call fails with `Image transcription returned no text.`
 
 ---
 
@@ -101,7 +121,7 @@ Failures use the BRA401 error envelope `{ "error": "…" }`.
 | Missing / empty `file` | `400` | `No file provided.` |
 | File larger than 20 MB | `400` | `File exceeds the 20 MB size limit.` |
 | Unsupported extension | `400` | `Unsupported file type: .xyz` (or `(no extension)`) |
-| Image with no usable AI key / model | `400` | `No transcription model available. Configure ANTHROPIC_API_KEY or OPENAI_API_KEY, or set a transcription model in Brain Settings.` |
+| Image or PDF OCR fallback with no usable AI key / model | `400` | `No transcription model available. Configure ANTHROPIC_API_KEY or OPENAI_API_KEY, or set a transcription model in Brain Settings.` |
 | Extraction / vision call failed | `400` | e.g. `Failed to extract text from .pdf file.` / `Image transcription failed.` |
 | Missing or invalid API key | `401` | — (BRA401 auth) |
 
@@ -113,8 +133,12 @@ The Tool Router's webhook dispatch **cannot inject HTTP headers**. A Brain
 cannot call `POST /transcription` via a declared tool definition — the request
 would arrive without `Authorization` and receive `401`. Use this endpoint from
 harness code, CLI scripts, or other callers that can send the brain API key.
-In-brain workflows that need text from files should receive already-transcribed
-content (e.g. via inbox body) rather than calling this HTTP path as a tool.
+
+In-brain workflows that need text from an **image URL** should call the
+`transcribe_image` system tool (**BRA412**), which loads the image in-process
+and can take an optional vision prompt. Workflows that need text from uploaded
+files should receive already-transcribed content (e.g. via inbox body) rather
+than calling this HTTP path as a tool.
 
 ---
 
@@ -135,4 +159,5 @@ content (e.g. via inbox body) rather than calling this HTTP path as a tool.
 - **BRA401** — authentication, error envelope, common status codes
 - **BRA202** — `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` naming and upload rules
 - **BRA404** — inbox intake (a common destination for transcribed text)
-- **BRA201** — `transcription-model` in `brain-compose.yml`
+- **BRA213** — `transcription-model` in `brain-compose.yml`
+- **BRA412** — `transcribe_image` system tool (URL + optional prompt)
