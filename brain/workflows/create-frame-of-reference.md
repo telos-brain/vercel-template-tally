@@ -5,7 +5,7 @@ description: >-
   Builds a grounded frame of reference for a given context using the brain
   glossary and blueprint memory — problem statement, frame, domain model,
   bigger picture, and considerations.
-version: 1
+version: 2
 # Fallback when no brain default is set. Settings / DEFAULT_LLM_MODEL /
 # compose llm-model wins when that credential exists (BRA210).
 model: anthropic/claude-sonnet-4-6

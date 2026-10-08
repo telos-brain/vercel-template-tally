@@ -1,7 +1,7 @@
 ---
 name: Managing LLM Costs
 code: BRA212
-version: 4
+version: 6
 description: How to keep LLM spend down in a Telos Brain — aim for 80% cache
   reads (or turn on automatic caching), convert JSON tool data to markdown or
   CSV, treat tool definitions as mini-skills to cut retries, compact older
@@ -60,11 +60,16 @@ caching: automatic
 | omitted | Historic hand-crafted per-block `cache_control` markers |
 | `none` | Suppress all cache markers — only for short, one-shot jobs (e.g. `WF-COMPACT`) |
 
-Applied on Anthropic and xAI; OpenAI ignores it (**BRA210** §5).
+Applied on Anthropic and xAI; OpenAI ignores it (**BRA210** §6).
 
 - **Claude:** top-level `cache_control` — the API places the breakpoint.
-- **xAI / Grok:** `x-grok-conv-id` sticky-routing header keyed by
-  `WorkflowRunId`, which is what makes Grok cache hits possible.
+  `caching: automatic` is required; omitted keeps the older per-block markers.
+- **xAI / Grok:** the API caches by itself. Chat Completions uses
+  `x-grok-conv-id` (the `prompt_cache_key`) keyed by `WorkflowRunId`, sent on
+  every call unless `caching: none`. Without that header a follow-up often
+  lands on a cache-cold server and pays full input price. Later turns append
+  to the previous messages and send `reasoning_content` back. See
+  [What Breaks Caching](https://docs.x.ai/developers/advanced-api-usage/prompt-caching/multi-turn).
 
 ### How to actually hit 80%
 
@@ -75,7 +80,7 @@ The cache prefix must be **byte-stable** across turns of the same run:
 - Prefer `available-skills` / `available-tools` over stuffing the prefix
   (see §7). Discovery tools load depth on demand; the prefix stays small
   and stable.
-- Fetch structured context with `input-tools` (**BRA201** §8.0a) rather than
+- Fetch structured context with `input-tools` (**BRA217**) rather than
   rewriting the system prompt per run. Pre-called results land in a user
   block *after* the cacheable prefix.
 - Reuse chat sessions (`POST /workflows/{code}/run/sync`, then continue the
@@ -146,7 +151,7 @@ response-markdown: |
 error-markdown: |
   Could not list widgets: {{result.error}}
 
-  Load **BRA201** §5 if the call shape looks wrong. Do not retry with a
+  Load **BRA214** if the call shape looks wrong. Do not retry with a
   different parameter name.
 ```
 
@@ -166,7 +171,7 @@ Rules:
 **Tool definitions are mini-skills.** They sit in the system prompt (and
 therefore in the cache prefix). Prefer fixing the tool YAML — description,
 parameter names/descriptions, `response-markdown`, `error-markdown` — over
-teaching the tool only in a skill (**BRA105**, **BRA201** §5).
+teaching the tool only in a skill (**BRA105**, **BRA214**).
 
 Every failed call is a billed turn (full prompt + output) plus another billed
 turn for the retry. A vague tool that the model mis-invokes twice can cost
@@ -181,10 +186,10 @@ more than the successful work.
 | Parameter `type` | `int` / `decimal` / `date` / `datetime` so the router coerces before dispatch — parse failures become a clear tool error instead of a bad HTTP call. |
 | Hidden bindings | Tenant ids, API keys, and run inputs are **not** LLM-facing. Bind them; do not ask the model to copy a UUID. |
 | `response-markdown` | Compact success text. Tell the model what happened and the reference to use next. |
-| `error-markdown` | Name the skill to load (`get_skill BRA201`), then stop. Do not invite a guessed retry. |
+| `error-markdown` | Name the skill to load (`get_skill BRA215`), then stop. Do not invite a guessed retry. |
 
 Canonical pattern — `create_skill` (**BRA203**): success returns the new
-code; failure points at **BRA203** / **BRA208** / **BRA201** instead of
+code; failure points at **BRA203** / **BRA208** / **BRA215** instead of
 dumping a parser stack.
 
 ```yaml
@@ -195,7 +200,7 @@ error-markdown: |
 
   - **BRA203** — `create_skill` parameters
   - **BRA208** — categories and ranges
-  - **BRA201** — skill file format
+  - **BRA215** — skill file format
 
   Do not pass `brain_id` — it is harness-injected.
 ```
@@ -274,11 +279,24 @@ a cheap one.
 `XAI_API_KEY` in the brain `.env` (**BRA202**) and:
 
 ```yaml
-model: xai/grok-4.5
+model: telosbrain/xai/grok-4.6
 ```
+
+On Telos Cloud that string uses the **platform Grok key** — do not put
+`XAI_API_KEY` on the brain. Token cost is priced at **double** the official
+xAI grok-4.6 short-context API rate (input, output, and cache-read) and
+debited from the organisation's **brain credit**, the same ledger as run
+minutes. Platform `LlmPrices` rows are keyed `provider=telosbrain`,
+`model=xai/grok-4.6` (not `xai` / `grok-4.6`). Direct `xai/grok-4.6` on your
+own key is **not** marked up.
+
+Local Docker has no platform key. Use `xai/grok-4.6` (or `xai/grok-4.5`)
+with `XAI_API_KEY`, or a `local_N/…` runner (**BRA106**).
 
 | `model` | Typical use |
 |---|---|
+| `telosbrain/xai/grok-4.6` | Telos-hosted Grok 4.6 — brain credit at 2× official xAI grok-4.6 API rate |
+| `xai/grok-4.6` | Same model on **your** xAI key — you pay xAI at list |
 | `xai/grok-4.5` | Flagship Grok — agentic / coding, usually cheaper than Claude Sonnet at similar quality |
 | `xai/grok-4.3` | Lower-cost long-context Grok — good for COMPACTION, classification, simple `TOOL` workflows |
 | `anthropic/claude-haiku-4-5` | Fast, cheap Claude turns (compaction, short Q&A) |
@@ -287,13 +305,14 @@ model: xai/grok-4.5
 
 Match the model to the workflow, not the brain:
 
-- Chat / general agent: `xai/grok-4.5` unless you have a Claude-specific
-  reason (native `web_search` / `web_fetch`, thinking modes).
+- Chat / general agent: `telosbrain/xai/grok-4.6` on Telos Cloud, or
+  `xai/grok-4.5` / `xai/grok-4.6` with your own key, unless you have a
+  Claude-specific reason (native `web_search` / `web_fetch`, thinking modes).
 - Compaction, ask-question, routing: Haiku or `xai/grok-4.3`.
 - Do not put Opus on a heartbeat or eval loop.
 
 Native tools (`web_search`, `web_fetch`) are Anthropic-shaped and are
-skipped on OpenAI / xAI (**BRA210** §6). If a workflow needs them, keep
+skipped on OpenAI / xAI / Telos Brain (**BRA210** §6). If a workflow needs them, keep
 Claude for that workflow only.
 
 Organisation `LlmPrices` must include the model you pick. A missing price
@@ -304,7 +323,10 @@ monthly spend limits cannot see the spend. For OpenRouter, add rows with
 OpenRouter runs that persist billed `usage.cost` do not need a matching row
 for `CostCents` to populate. Local runners and Azure OpenAI are bring-your-
 own-billing: do not seed `LlmPrices` for them; `CostCents` stays null.
-Platform credits still apply via `RunSeconds`.
+Platform credits still apply via `RunSeconds`. `telosbrain/…` is the
+exception: token `CostCents` (2× xAI list) is also debited from brain
+credit. Do not add a customer `LlmPrices` row for `telosbrain` — the
+platform seed is authoritative.
 
 ---
 
@@ -314,7 +336,7 @@ Give every workflow a budget and refuse work that exceeds it. Raise a
 limit only when the work needs more, never because the model asked
 (**BRA105**).
 
-### Per-workflow (frontmatter — **BRA201** §8.1)
+### Per-workflow (frontmatter — **BRA217**)
 
 ```yaml
 model: xai/grok-4.5
@@ -333,10 +355,10 @@ max-recursion-depth: 5
 |---|---|---|
 | `output-tokens` | `4096` (one attempt) | Ceiling per attempt. A list (`2048, 4096, 16384`) is ordered retries when a turn stops at `max_tokens`. Failed truncated attempts are still billed. Prefer a short first cap. |
 | `max-turns` | `10` | Tool-use loop cap. The run **Fails** when it is exhausted. Chat (`WF-CHAT`) may need more; a lookup workflow should stay at 3–8. |
-| `thinking` / `thinking-effort` / `thinking-budget` | thinking off | Claude-only at request time (**BRA210** §5). `thinking-effort` is the spend lever — Anthropic bills tokens *generated*, not `output-tokens`. Prefer `adaptive` + `low` over `extended`. |
+| `thinking` / `thinking-effort` / `thinking-budget` | thinking omitted (provider default; Grok `high`) | Applied on every provider (**BRA210** §6). `thinking-effort` is the spend lever — billed tokens *generated*, not `output-tokens`. Omitted `thinking` does not override Grok's default of `high`. `thinking-budget` is Claude and OpenRouter `extended` only. Prefer `adaptive` + `low` over `extended`. |
 | `max-runs-per-hour` | `50` | Rolling-hour cap per workflow. Heartbeats and eval batches set this *up*; user-facing tools should stay low. |
 | `max-recursion-depth` | `5` | Caps `run_workflow` / workflow-tool nesting before a child `WorkflowRun` is created. |
-| `session-timeout` | `30` (minutes) | Closes idle chat sessions so they stop accruing and become eligible for eval (**BRA201** §8.2). |
+| `session-timeout` | `30` (minutes) | Closes idle chat sessions so they stop accruing and become eligible for eval (**BRA217**). |
 
 `output-tokens` and `max-turns` apply on every provider. Do not copy
 `WF-CHAT`'s `max-turns: 50` onto a triggered or tool workflow.
@@ -400,14 +422,14 @@ split when it covers too much, and point at related codes (`see **BRA201**
 
 Tool definitions sit in the system prompt. A workflow with only `tools:`
 and no `available-tools` injects **every** listed tool on every turn
-(**BRA201** §8).
+(**BRA217**).
 
 | Frontmatter | What the model sees | Cost |
 |---|---|---|
 | `tools` | Full tool schema (name, description, parameters) every turn | High — inject only discovery tools plus tools used on most turns |
 | `available-tools` | Permission envelope only — not in the prompt until surfaced | Low until discovered or promoted |
 
-How an available tool becomes callable (**BRA201** §6.3):
+How an available tool becomes callable (**BRA215**):
 
 1. **`find_available_tools`** — semantic search over the workflow's
    `available-tools` pool (`query` → names and descriptions). Inject this
@@ -503,10 +525,10 @@ Checklist when reviewing a brain for cost:
 - [ ] Tool `error-markdown` names a skill to load — no blind retries
 - [ ] Hidden bindings for secrets, entity, unit-of-work, and input
 - [ ] One `type: COMPACTION` workflow exists; chat sets `auto-compaction`
-- [ ] `model` is Grok / Haiku unless Claude is required
+- [ ] `model` is Grok / Haiku unless Claude is required (`telosbrain/xai/grok-4.6` on Telos Cloud)
 - [ ] `output-tokens` starts small; `max-turns` matches the job
 - [ ] `daily-limit-usd` / `monthly-limit-usd` are set on the compose file
-- [ ] Organisation `LlmPrices` includes every model the brain calls (OpenRouter: provider `openrouter`, catalogue id as the model)
+- [ ] Organisation `LlmPrices` includes every BYO model the brain calls (OpenRouter: provider `openrouter`, catalogue id as the model). Skip `telosbrain` — platform prices at 2× xAI list.
 - [ ] Conversational workflows inject discovery tools (`find_available_skills`,
       `get_skill`, `find_available_tools`) and keep domain skills/tools in
       `available-skills` / `available-tools`
@@ -517,8 +539,10 @@ Checklist when reviewing a brain for cost:
 
 - **BRA103** — skill codes and progressive disclosure
 - **BRA105** — budget principle and “keep each skill short” (always inject when editing the brain)
-- **BRA201** §5 — tool YAML; §6.3 skill-declared tool promotion; §8 `tools` / `available-tools`; §8.0a `input-tools`; §8.1 LLM execution settings
-- **BRA202** — `XAI_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
+- **BRA214** — tool YAML
+- **BRA215** — skill-declared tool promotion
+- **BRA217** — workflow `tools` / `available-tools`, `input-tools`, LLM execution settings
+- **BRA202** — `XAI_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` (`telosbrain/…` needs none of these)
 - **BRA203** — schema tools (`update_schema_file` to apply these fields)
 - **BRA204** §3.5 — `{{result.*}}` in `response-markdown` / `error-markdown`
 - **BRA210** — provider / model strings and which settings each provider honours

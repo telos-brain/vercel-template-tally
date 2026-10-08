@@ -1,7 +1,7 @@
 ---
 name: Updating a Brain from a Template
 code: BRA206
-version: 4
+version: 5
 description: How to update an existing brain's configuration from a source
   (template) brain via the Management API — POST
   /brains/{targetInstance}/update-from/{sourceInstance} — including version
@@ -18,7 +18,7 @@ those improvements into the destination **without overwriting** resources the
 destination already holds at a higher version.
 
 Update-from is a version-gated configuration sync. It mirrors CLI redeploy
-precedence (BRA201 §9) over an HTTP call between two brains in the same
+precedence (BRA201) over an HTTP call between two brains in the same
 organisation. Runtime data and destination environment variables are never
 touched.
 
@@ -72,7 +72,7 @@ endpoints (`/skills`, `/workflows`, `/tools`, `/memory`, `/schema`):
     },
     {
       "resourceType": "Connector",
-      "code": "salesforce",
+      "code": "example-oauth2",
       "action": "Created",
       "incomingVersion": 0,
       "storedVersion": 0,
@@ -118,7 +118,7 @@ shape: `{ "error": "message" }`.
 
 ## 2. Version precedence
 
-Applied independently per versioned resource (same rule as BRA201 §9 / CLI
+Applied independently per versioned resource (same rule as BRA201 / CLI
 redeploy):
 
 | Condition | Outcome |

@@ -1,7 +1,7 @@
 ---
 name: "Execution API: Workflow Execution & Telemetry"
 code: BRA403
-version: 18
+version: 22
 description: How to list a brain's workflows (with pending inbox-task counts),
   run them synchronously (SSE streaming) or asynchronously (fire-and-forget
   with callback), pass optional run variables for {{input.*}} template tags
@@ -92,7 +92,7 @@ and async endpoints accept the same optional `variables` object.
 1. The map is persisted on the run before execution starts.
 2. Template tags `{{input.<key>}}` resolve to those values in workflow
    Instructions, system prompts, tool response markdown, and `input-tools`
-   parameter mappings (see **BRA201** §8.0a / **BRA409**).
+   parameter mappings (see **BRA217** / **BRA409**).
 3. Nested `run_workflow` / workflow-tool child runs inherit the parent's
    variables automatically.
 4. Missing keys render blank (never an error). Omitting `variables` leaves
@@ -156,7 +156,10 @@ Response headers:
 Content-Type: text/event-stream
 Cache-Control: no-cache
 Connection: keep-alive
+X-Accel-Buffering: no
 ```
+
+While a turn is running, the server writes SSE **comment** keep-alives (`: keepalive`) every 15 seconds whenever no progress event has been sent. Comments are not `data:` events and must be ignored. They keep the HTTP connection active so Azure (and other proxies) do not close an idle SSE stream during a long tool call. A real client disconnect still fails the run.
 
 Event stream:
 
@@ -211,24 +214,27 @@ Response `202 Accepted`:
 
 Returns `404 Not Found` if the workflow code does not resolve within the brain.
 
-The engine executes the run in the background (`Queued → Running → Completed / Failed`). A run settles `Failed` (not `Completed`) when the model hits a terminal limit — the workflow's `max-turns` cap is exhausted, or the final `output-tokens` attempt stops with `max_tokens` and no further retry remains — as well as on transport / API errors and cancellation. If a `callbackUrl` was supplied, a webhook is POSTed on completion:
+The engine executes the run in the background (`Queued → Running → Completed / Failed`). A run settles `Failed` (not `Completed`) when the model hits a terminal limit — the workflow's `max-turns` cap is exhausted, or the final `output-tokens` attempt stops with `max_tokens` and no further retry remains — as well as on transport / API errors and cancellation. If a `callbackUrl` was supplied, the engine **POSTs** the payload to that URL when the run finishes. The request URL is `callbackUrl` unchanged (an existing query string stays; the payload is not added to it). The body is the JSON payload, with `Content-Type: application/json; charset=utf-8`.
 
 ```http
 POST https://app.example.com/brain/callbacks/run-complete
-Content-Type: application/json
+Content-Type: application/json; charset=utf-8
 
 {
   "runId": "44291...",
-  "status": "complete"
+  "status": "complete",
+  "response": "We currently have three open proposals."
 }
 ```
 
-`status` is `complete` or `failed`. Webhook delivery is retried on transient failure; a persistent failure is logged but does not fail the run. Results are always retrievable via telemetry.
+`status` is `complete` or `failed`. `response` is the assembled final assistant text: the same text the sync path streams as `text` deltas, or the error message when the run fails. It is JSON `null` when the run produced no reply. Quotes, backslashes and newlines inside `response` are JSON-escaped so the body stays valid.
+
+Delivery is attempted up to three times. A non-success HTTP status or a transport error is retried; a persistent failure is logged and does **not** change the run status. The final attempt is stored on the run as a `role=callback` message (the URL, whether it succeeded, the HTTP status, and the receiver's body or the error when there was no HTTP response). That message is shown on the run and included in telemetry. It is not sent back to the model. If no `callbackUrl` is given, nothing is posted and no callback message is written.
 
 #### Async callback SSRF rules
 
 Outbound `callbackUrl` delivery is SSRF-hardened (same rules as declared-tool
-`api.path` webhooks — see BRA201 §4.3):
+`api.path` webhooks — see BRA213):
 
 | Rule | Behaviour |
 |---|---|
@@ -261,7 +267,7 @@ Running  →  AwaitingInput  ⇄  Running (next turn)  →  Completed
 
 After each successful turn the run settles at `AwaitingInput` (open) with an `expiresDateUtc`. It is closed to `Completed` when you call `complete`, or automatically when its inactivity timeout passes (see [Session timeout](#session-timeout)). Manual **Run eval** can target a `Completed`, `Failed`, or `AwaitingInput` run (BRA207). Automatic evals still fire on `Completed`.
 
-**Cost and billing.** Each turn (including a sync call that leaves the run `AwaitingInput`) recalculates the run's LLM `CostCents` from its messages. OpenRouter turns that stored provider-billed `usage.cost` on every token-bearing message use that sum; otherwise cost is tokens × date-effective `LlmPrices` for the run's model (`openrouter` + catalogue id for OpenRouter). Daily time-based charges include open sessions: the night job bills `RunSeconds - BilledSeconds` and then raises `BilledSeconds`, so a chat that stays open is charged that day and a later continuation only bills the unbilled remainder.
+**Cost and billing.** Each turn (including a sync call that leaves the run `AwaitingInput`) recalculates the run's LLM `CostCents` from its messages. OpenRouter turns that stored provider-billed `usage.cost` on every token-bearing message use that sum; otherwise cost is tokens × date-effective `LlmPrices` for the run's model (`openrouter` + catalogue id for OpenRouter; `telosbrain` + `xai/grok-4.6` for `telosbrain/xai/grok-4.6`, seeded at **2×** official xAI grok-4.6 short-context list prices and debited from organisation brain credit). Daily time-based charges include open sessions: the night job bills `RunSeconds - BilledSeconds` and then raises `BilledSeconds`, so a chat that stays open is charged that day and a later continuation only bills the unbilled remainder.
 
 ### `POST /runs/{runId}/messages` — continue a session
 
@@ -303,18 +309,19 @@ Response `200 OK`:
 
 Stopping aborts the in-flight turn, including any model request that is still in progress. Any assistant text already written stays on the run. The session timeout is re-armed from the moment of the stop. A connected SSE stream ends once the turn leaves `Queued` / `Running`.
 
-A client disconnect on `/run/sync` or `/messages` (idle timeout, closed socket) still **fails** the run. If a turn may run longer than the connection can stay open, use `/run/async` instead of relying on a dropped sync stream.
+A client disconnect on `/run/sync` or `/messages` (closed socket) still **fails** the run. Comment keep-alives keep the stream alive through long tool waits; they do not change this contract. If a turn may run longer than the *client* can stay connected, use `/run/async`.
 
 To close the session after stopping, call `POST /runs/{runId}/complete`.
 
 ### `POST /runs/{runId}/complete` — close a session
 
 Closes an open session, transitioning it to `Completed` so it becomes eligible for
-learning evaluation (**BRA207**). If the brain has a `workflowrun:complete`
-workflow with `trigger-mode: automatic`, an eval is enqueued. If only
-`trigger-mode: manual` (or omitted) is configured, use the admin UI **Run eval**
-button on the run detail page (or `POST /brains/{instance}/runs/{runId}/eval` on
-the Management API).
+learning evaluation (**BRA207**). If the brain has a `type: EVAL` workflow
+whose `workflowrun:complete` trigger carries a learning-mode qualifier
+(BRA351), an eval is enqueued automatically. Omit the trigger (or leave it
+unqualified) for manual-only — use the admin UI **Run eval** button on the
+run detail page (or `POST /brains/{instance}/runs/{runId}/eval` on the
+Management API). The button is type-based and ignores the trigger.
 
 Response `200 OK`:
 
@@ -329,7 +336,7 @@ Idempotent: closing an already-`Completed` session also returns `200`. Returns `
 
 ### Session timeout
 
-An open session that is neither continued nor closed is swept to `Completed` once its `expiresDateUtc` passes, so abandoned chats do not linger. The inactivity window is set per workflow via the `session-timeout` frontmatter field (in minutes; see BRA201); when a workflow declares none, the engine default of **30 minutes** applies. The window is measured from the end of the most recent turn and re-armed on every continuation.
+An open session that is neither continued nor closed is swept to `Completed` once its `expiresDateUtc` passes, so abandoned chats do not linger. The inactivity window is set per workflow via the `session-timeout` frontmatter field (in minutes; see **BRA217**); when a workflow declares none, the engine default of **30 minutes** applies. The window is measured from the end of the most recent turn and re-armed on every continuation.
 
 ---
 
@@ -347,17 +354,27 @@ Response `200 OK`:
   "workflowId": "9c1a...",
   "entityId": "3f0c...",
   "unitOfWorkId": "7b2d...",
+  "workflowName": "Sales chat",
+  "workflowPath": "workflows/sales-chat.md",
+  "entityName": "Acme",
+  "unitOfWorkName": "Onboard",
   "status": "Completed",
   "createdAt": "2026-07-09T07:10:00Z",
   "completedAt": "2026-07-09T07:10:04Z",
   "resource": {
     "gen_ai.system": "telos-brain",
     "gen_ai.request.model": "anthropic/claude-sonnet-4-6",
-    "telos.thinking.mode": "effort"
+    "telos.thinking.mode": "effort",
+    "telos.workflow.name": "Sales chat",
+    "telos.workflow.code": "WF-SALES",
+    "telos.workflow.path": "workflows/sales-chat.md",
+    "telos.entity.name": "Acme",
+    "telos.unit_of_work.name": "Onboard"
   },
   "totals": {
     "gen_ai.usage.input_tokens": 1820,
     "gen_ai.usage.output_tokens": 430,
+    "cacheRatePercent": 85,
     "gen_ai.embeddings.count": 2,
     "telos.turns.used": 3,
     "telos.turns.max": 15
@@ -372,7 +389,13 @@ Resource / totals extensions (Telos-specific, alongside GenAI semantic conventio
 |---|---|
 | `gen_ai.request.model` | Fully-qualified model the run executed against (`provider/model`) |
 | `gen_ai.embeddings.count` | Embeddings generated in the run (always present on `totals`). OTEL standardises `gen_ai.embeddings.dimension.count` (vector size) only; this is the count of embeddings produced. |
+| `cacheRatePercent` | Whole percent: cache reads / (uncached input + cache reads + cache writes). Null when all three are zero. |
 | `telos.thinking.mode` | Workflow thinking mode (`none` \| `adaptive` \| `extended` \| `effort`) |
+| `telos.workflow.name` | Workflow title (falls back to code). Also on the payload as `workflowName`. |
+| `telos.workflow.code` | Workflow deploy code |
+| `telos.workflow.path` | Brain-root-relative schema path of the executed workflow (e.g. `workflows/ask-for-advice.md`). Prefers the path captured at deploy; falls back to `workflows/{code}.md`. Also on the payload as `workflowPath`. |
+| `telos.entity.name` | Entity name the run executed against (nullable) |
+| `telos.unit_of_work.name` | Unit-of-work title the run executed against (nullable) |
 | `telos.turns.used` | Completed assistant loop steps (excludes retries / `max_tokens` attempts) |
 | `telos.turns.max` | Effective max-turns cap for the run (workflow value or engine default 10) |
 
@@ -380,17 +403,19 @@ Span attributes:
 
 | Attribute | Notes |
 |---|---|
-| `gen_ai.message.role` | `user` \| `assistant` \| `tool` |
+| `gen_ai.message.role` | `user` \| `assistant` \| `tool` \| `compaction` \| `callback` |
 | `gen_ai.message.content` | Message content |
 | `gen_ai.usage.input_tokens` / `output_tokens` | Per-turn token counts |
 | `gen_ai.usage.cache_read_input_tokens` / `cache_creation_input_tokens` | Present only when the provider reports prompt-cache usage |
 | `gen_ai.tool.name` / `gen_ai.tool.call.id` | Present only on tool-call and tool-result turns |
+| `gen_ai.tool.duration_ms` | Wall-clock milliseconds the tool took, on the tool-result turn only. Omitted when the row did not capture a duration. |
+| `telos.callback.url` / `telos.callback.outcome` / `telos.callback.status_code` / `telos.callback.response` | Present on `role=callback` turns written after an async webhook POST. `outcome` is `succeeded` or `failed`. `status_code` is the receiver's HTTP status (omitted when the call produced no HTTP response). `response` is the receiver's body, or the error text when there was no HTTP response. These rows are not sent back to the model. |
 | `gen_ai.embeddings.count` | Embeddings generated for this turn (usually the assistant tool-call row). Omitted when unused. |
 | `gen_ai.response.finish_reason` | Provider stop reason on assistant turns (`end_turn` \| `tool_use` \| `max_tokens` \| ...) |
 | `gen_ai.request.max_tokens` | The output token cap the attempt ran with; doubles per output-token retry |
 | `error.message` | Present only on a failed / truncated assistant attempt |
 
-An output-token retry (see BRA201 `output-tokens`, the ordered per-attempt cap list) is not merged away: each attempt is its own assistant span carrying its `finish_reason` (`max_tokens` on a truncated attempt), the `max_tokens` cap it used and its consumed tokens, so a three-cap list that keeps truncating yields two truncated attempt spans before the final one. If that final attempt is still `max_tokens`, the run status is `Failed`.
+An output-token retry (see **BRA217** `output-tokens`, the ordered per-attempt cap list) is not merged away: each attempt is its own assistant span carrying its `finish_reason` (`max_tokens` on a truncated attempt), the `max_tokens` cap it used and its consumed tokens, so a three-cap list that keeps truncating yields two truncated attempt spans before the final one. If that final attempt is still `max_tokens`, the run status is `Failed`.
 
 Returns `404 Not Found` if the run does not belong to the brain.
 

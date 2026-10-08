@@ -1,7 +1,7 @@
 ---
 name: Environment Variables, Secrets & API Keys
 code: BRA202
-version: 20
+version: 27
 description: "How a brain's .env variables are uploaded, encrypted and stored; the
   well-known \"system\" keys the platform recognises (LLM provider keys, local
   runner URLs, the brain API key); how to inject a stored secret into an api
@@ -78,14 +78,14 @@ convention** and used automatically:
 | `ANTHROPIC_API_KEY`     | uploaded     | LLM provider key for **Anthropic / Claude**. Resolved automatically for any run whose model is `anthropic/…` (or unprefixed — Anthropic is the default provider). |
 | `OPENAI_API_KEY`        | uploaded     | LLM provider key for **OpenAI**. Resolved for runs whose model is `openai/…`. Also the per-brain embedding key when `embedding-model` is `text-embedding-*`. |
 | `VOYAGE_API_KEY`        | uploaded     | Embedding provider key for **Voyage** (`voyage-*` models, including the default `voyage-3-lite`). Put this in `.env` so semantic search and skill/tool embeddings can run. |
-| `XAI_API_KEY`           | uploaded     | LLM provider key for **xAI / Grok**. Resolved for runs whose model is `xai/…` (**BRA210**).       |
+| `XAI_API_KEY`           | uploaded     | LLM provider key for **xAI / Grok**. Resolved for runs whose model is `xai/…` (**BRA210**). Not used for `telosbrain/…`. |
 | `OPENROUTER_API_KEY`    | uploaded     | LLM provider key for **OpenRouter**. Resolved for runs whose model is `openrouter/…`. Remainder after the first `/` is the OpenRouter model id (**BRA210**). |
 | `AZURE_OPENAI_API_KEY`  | uploaded     | LLM provider key for **Azure OpenAI**. Resolved for runs whose model is `azure/…`. Must be paired with `AZURE_OPENAI_ENDPOINT`. Not `AZURE_API_KEY` (**BRA210**). |
 | `AZURE_OPENAI_ENDPOINT` | uploaded     | Azure OpenAI resource endpoint (e.g. `https://YOUR-RESOURCE.openai.azure.com`). Required for `azure/…` models. Configuration value stored per-brain like other env vars (**BRA210**). |
 | `AZURE_OPENAI_API_VERSION` | uploaded  | Optional Azure OpenAI REST `api-version`. Defaults to `2024-10-21` when omitted (**BRA210**). |
 | `LOCAL_LLM_N_BASE_URL`  | uploaded     | Base URL for local runner N (Ollama, llama.cpp). Required to use `local_N/…`. Example: `LOCAL_LLM_1_BASE_URL=http://host.docker.internal:11434/v1` (**BRA210**, **BRA106** §8). |
 | `LOCAL_LLM_N_API_KEY`   | uploaded     | Optional API key for a secured local runner. Omit for unsecured Ollama. |
-| `DEFAULT_LLM_MODEL`     | uploaded     | Optional default LLM (`provider/model`, e.g. `local_1/qwen3:8b`). Same role as Settings **Default LLM model** and compose `llm-model`. When set and the matching credential exists, every live run uses this model instead of the workflow frontmatter. Blank/omitted → each workflow's own `model:`; if that is also omitted the run fails (leftover cloud keys are not a silent default). Compose `llm-model` wins when both are present. See **BRA210**. |
+| `DEFAULT_LLM_MODEL`     | uploaded     | Optional default LLM (`provider/model`, e.g. `local_1/qwen3:8b`). Same role as Settings **Default LLM model** and compose `llm-model`. Used when a workflow omits `model:`. A workflow `model:` overrides it when that model's credential exists. Blank/omitted and no workflow `model:` → the run fails (leftover cloud keys are not a silent default). Compose `llm-model` wins when both are present. See **BRA210**. |
 | `TIMEZONE`              | uploaded     | Optional IANA timezone id (e.g. `Pacific/Auckland`) used by `{{now.local*}}` template tags. When unset or unrecognised, local time falls back to UTC. |
 | `TELOS_BRAIN_ORG_API_KEY` | **local**  | Organisation deploy credential the CLI authenticates with. Never uploaded to the brain. Legacy: `TELOS_ORG_API_KEY`. |
 | `TELOS_BRAIN_API_URL`   | **local**    | Management API base URL (deploy destination) for the CLI. Never uploaded to the brain. Legacy: `TELOS_API_URL`. |
@@ -99,6 +99,10 @@ name of the form `<PROVIDER>_API_KEY` (upper-case). So:
 - `anthropic/claude-sonnet-4-5` → looks up **`ANTHROPIC_API_KEY`**
 - `openai/gpt-…` → looks up **`OPENAI_API_KEY`**
 - `xai/grok-4.5` → looks up **`XAI_API_KEY`**
+- `telosbrain/xai/grok-4.6` → **no brain variable**. Uses the platform
+  `Grok:ApiKey`. Billed to organisation brain credit at 2× the official
+  xAI grok-4.6 API rate (**BRA210**, **BRA212**). Unavailable locally —
+  use `xai/grok-4.6` with `XAI_API_KEY` instead.
 - `openrouter/anthropic/claude-sonnet-4.6` → looks up **`OPENROUTER_API_KEY`**
   (wire model is `anthropic/claude-sonnet-4.6`)
 - `openrouter/auto` → looks up **`OPENROUTER_API_KEY`** (wire model is
@@ -119,12 +123,14 @@ name of the form `<PROVIDER>_API_KEY` (upper-case). So:
 
 Always name the Claude key **`ANTHROPIC_API_KEY`** — that is the one and only
 name the platform looks for for Anthropic. Use **`OPENAI_API_KEY`** for OpenAI,
-**`XAI_API_KEY`** for Grok, and **`OPENROUTER_API_KEY`** for OpenRouter. Azure
+**`XAI_API_KEY`** for bring-your-own Grok, and **`OPENROUTER_API_KEY`** for OpenRouter. Azure
 OpenAI uses **`AZURE_OPENAI_API_KEY`** plus **`AZURE_OPENAI_ENDPOINT`**
 (optional **`AZURE_OPENAI_API_VERSION`**). Local
 runners are the other exception to the
-`<PROVIDER>_API_KEY` pattern: they use `LOCAL_LLM_N_BASE_URL`. If a workflow's
-model resolves to a provider whose required variable is not set for the brain,
+`<PROVIDER>_API_KEY` pattern: they use `LOCAL_LLM_N_BASE_URL`.
+`telosbrain/…` is also an exception — it never reads a brain env var.
+If a workflow's model resolves to a provider whose required variable is not
+set for the brain (or, for `telosbrain`, the platform key is missing),
 the run cannot start.
 
 For the full list of supported providers, example workflow `model` codes, and
@@ -147,7 +153,9 @@ This is expressed with these parameter fields:
   decrypted value is injected.
 - `header:` — *(optional)* the **HTTP header name** to place it in (e.g.
   `Authorization`). A parameter with `header:` is sent as a request header;
-  **without** `header:` the value goes into the request payload instead (§3.3).
+  **without** `header:` the value goes into the request payload instead
+  (§3.3) — or into the URL if `api.path` contains `{name}` or `{param}`
+  (BRA214).
 - `value:` (optional) — a **template** in which the placeholder `{secret}` is
   replaced by the resolved secret, so you can format things like
   `"Bearer {secret}"`. With `secret:` but **no** `value:`, the raw secret is
@@ -166,6 +174,16 @@ decrypted variable named by `secret:` (substituted into the `{secret}` template
 when `value:` is present); else (2) a hardcoded `value:`; else (3) for an exposed
 parameter, the argument the model supplied under the parameter's `name`. A
 parameter that resolves to nothing is omitted from the request.
+
+`secret:` on **one** tool does not inject that header (or query/body field)
+on other tools. For a value every call needs, declare it once on the
+connector as `request-defaults` (`header:` + `secret:` / `value:`) or as
+`oauth-captures` → `header:` after Connect (**BRA209**). A capture `header:`
+owns that name; a request-default for the same header is ignored. A missing
+connector header secret or capture value fails the tool before the HTTP
+call. A name in `.env` is unused until a tool `secret:`, a `request-defaults`
+`secret:`, or a capture `store:` references it and the value has been
+uploaded.
 
 ### 3.1 Worked example — calling an authenticated API
 
@@ -238,10 +256,10 @@ parameters:
 
 > Header vs value/query: a parameter with a hardcoded `value:` **and no**
 > `secret:`/`header:` is still a fixed body/query parameter hidden from the LLM
-> (see BRA201 §5.3). Adding `header:` moves it to a request header; adding
+> (see BRA214). Adding `header:` moves it to a request header; adding
 > `secret:` sources its value from a stored variable instead of hardcoding it.
 
-### 3.3 Where the secret goes: header, query or body
+### 3.3 Where the secret goes: header, query, body or URL
 
 `header:` is only one placement. When a parameter has **no** `header:`, its
 resolved value joins the request **payload**, and the HTTP method decides how:
@@ -249,6 +267,10 @@ resolved value joins the request **payload**, and the HTTP method decides how:
 - **GET** — payload parameters are appended to the URL as the **query string**
   (`?key=value`, url-encoded).
 - **POST / other** — payload parameters are serialised into the **JSON body**.
+- **URL path** — write `{name}` (or `{param}`) in `api.path` to put the value
+  in the path instead of the query string or JSON body. See BRA214.
+
+Do not set both `header:` and `path:` on the same parameter.
 
 So an API keyed by a query parameter or a body field (rather than a header)
 still injects the secret with `secret:` — just omit `header:`:
@@ -269,7 +291,7 @@ parameters:
 ```
 
 The `param:` field renames the wire key when it must differ from the AI-facing
-`name` (BRA201 §5.3) — e.g. `param: apiKey` sends `apiKey=…` while the parameter
+`name` (BRA214) — e.g. `param: apiKey` sends `apiKey=…` while the parameter
 is still authored as `api_key`. Either way the secret parameter stays hidden
 from the model.
 
@@ -289,10 +311,11 @@ this same encrypted store. They are never written into the connector YAML.
 
 - Declare the parameter names on the connector file (schema). For **api-key**
   connectors, set `secret:` on the `api-key` parameter to the `.env` variable
-  name.
+  name. For **oauth2** connectors, set `secret:` on `client-id` and
+  `client-secret` the same way (e.g. `EXAMPLE_CLIENT_ID` / `EXAMPLE_CLIENT_SECRET`).
 - Put the values in `.env` (or upsert via the Management API secrets endpoint,
   which uses connector-scoped keys such as `CONNECTOR_{connectorId}_CLIENT_ID`
-  for OAuth Connect).
+  when `secret:` is omitted).
 - OAuth **access / refresh tokens** are runtime state (the OAuth flow), not
   environment variables — do not put bearer tokens in `.env` for that purpose.
 
@@ -308,8 +331,9 @@ An **api-key** connector may take its **API key** from this store via YAML
 `secret:` on the `api-key` parameter (the same field as tool parameters). Put
 the key in `.env` under that variable name — e.g. `secret: ELEVENLABS_API_KEY`
 with `ELEVENLABS_API_KEY=xi-…` in `.env`. When `secret:` is omitted the
-platform still reads `CONNECTOR_{connectorId}_CLIENT_SECRET`. See **BRA209**
-§4.5.
+platform still reads `CONNECTOR_{connectorId}_CLIENT_SECRET`. An **oauth2**
+connector does the same on `client-id` / `client-secret` (e.g.
+`secret: EXAMPLE_CLIENT_ID`). See **BRA209** §4.1 / §4.5.
 
 See **BRA209** for the connector file format and examples.
 

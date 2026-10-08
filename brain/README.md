@@ -17,6 +17,7 @@ Precise enough for Cursor / Claude Code. Complete local steps in the root README
 # and runs npm run db:push. Then fill ANTHROPIC_API_KEY, VOYAGE_API_KEY, and remaining
 # MY_APP_* in .env.local. Optional: OPENROUTER_API_KEY, AZURE_OPENAI_*,
 # LOCAL_LLM_1_BASE_URL, DEFAULT_LLM_MODEL (BRA210 / BRA106 §8).
+# Telos Hosted can use compose llm-model: telosbrain/xai/grok-4.6 (not local).
 brain deploy --env local --instance local-brain
 ```
 

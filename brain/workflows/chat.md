@@ -2,7 +2,7 @@
 name: Chat
 code: WF-CHAT
 description: General-purpose conversational assistant with web access, skill lookup, memory search, focused Q&A and personal-finance tools.
-version: 4
+version: 5
 # Fallback when no brain default is set. Settings / DEFAULT_LLM_MODEL /
 # compose llm-model wins when that credential exists (BRA210).
 model: anthropic/claude-sonnet-4-6
@@ -44,6 +44,9 @@ tools:
 available-tools:
   - find_available_tools
   - compact_context
+  - transcribe_image
+  - web_search
+  - web_fetch
   - list_blueprint_entries
   - add_blueprint_entry
   - update_blueprint_entry

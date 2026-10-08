@@ -1,8 +1,10 @@
 name: find_available_skills
-version: 1
+version: 2
 description: >-
-  Finds available skills by semantic search. Use when you need to discover which
-  skill applies to a task before loading it with get_skill.
+  Searches skills by semantic relevance and returns the top matches (code,
+  name, description). Always search before starting a task, then load the
+  full skill with get_skill. Use list_skills when you need the full catalogue
+  for a SkillBook.
 system:
   tool: find_available_skills
 parameters:
@@ -11,3 +13,10 @@ parameters:
     description: The search query used to find relevant skills.
     type: string
     required: true
+
+# Search returns stubs (code, name, description). The body is not JSON, so
+# {{result.result}} is the raw markdown (BRA204 §3.5).
+response-markdown: |
+  {{result.result}}
+
+  Note: These are stubs only — skill content is NOT loaded. You must call get_skill(code) before applying or referencing any skill. Do not answer from descriptions.
